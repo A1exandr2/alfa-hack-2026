@@ -1,0 +1,27 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# JavaScript
+node_modules/
+.next/
+coverage/
+
+# Build and local artifacts
+dist/
+build/
+*.log
+.DS_Store
+
+# Large ML artifacts: track metadata, not binaries
+ml/artifacts/*
+!ml/artifacts/README.md
+!ml/artifacts/.gitkeep
