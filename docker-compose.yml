@@ -1,0 +1,24 @@
+name: credit
+
+# Empty Dockerfiles are intentional. Enable app profile after implementation.
+services:
+  frontend:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    init: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    ports: ["127.0.0.1:3000:3000"]
+  backend:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    init: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    ports: ["127.0.0.1:8080:8080"]
+# ML inference belongs inside backend; ml/Dockerfile is for offline training.
+# devops/Dockerfile is reserved for tooling, not an application service.

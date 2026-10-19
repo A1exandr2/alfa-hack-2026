@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Сейчас включен security. Build/lint/docker включим после появления кода.
+# CI работает на GitHub; локальный runner подключим к deploy, когда он появится.
+jobs:
+  gitleaks:
+    name: Security / Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan secrets
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" \
+            zricethezav/gitleaks:v8.18.2 \
+            detect --source=/repo --redact --verbose
+
+  semgrep:
+    name: Security / Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Static analysis
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            semgrep/semgrep:1.116.0 \
+            semgrep scan --config=p/java --config=p/python \
+            --config=p/javascript --config=p/security-audit --error .
+
+  trivy-dependencies:
+    name: Security / Trivy dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scan dependencies
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            aquasec/trivy:0.61.1 fs --scanners vuln \
+            --skip-dirs devops/runner --no-progress \
+            --severity HIGH,CRITICAL --exit-code 1 .
+
+  # Заготовки: включать только после добавления соответствующего кода.
+  compile-check:
+    name: Build / Maven
+    if: vars.ENABLE_JAVA_CI == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and test backend
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app/backend \
+            maven:3.9-eclipse-temurin-21 mvn -B clean verify
+
+  python-lint:
+    name: Lint / Python
+    if: vars.ENABLE_PYTHON_CI == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install linters
+        run: pip install flake8==7.1.2 black==25.1.0
+      - name: Check Python style
+        run: |
+          flake8 --max-line-length=100 ml
+          black --check ml
+
+  checkov:
+    name: Security / Checkov Dockerfiles
+    if: vars.ENABLE_DOCKER_CI == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check application Dockerfiles
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            bridgecrew/checkov:3.2.471 \
+            -f frontend/Dockerfile -f backend/Dockerfile --framework dockerfile
+
+  docker-build-and-scan:
+    name: Docker / Build and Trivy scan
+    if: vars.ENABLE_DOCKER_CI == 'true'
+    needs: [gitleaks, semgrep, trivy-dependencies, checkov]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: |
+          docker build -f "${{ matrix.component }}/Dockerfile" \
+            -t "credit-${{ matrix.component }}:${{ github.sha }}" .
+      - name: Scan image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.61.1 image --image-src docker --no-progress \
+            --severity HIGH,CRITICAL --exit-code 1 \
+            "credit-${{ matrix.component }}:${{ github.sha }}"
+
+# Deploy добавим, когда появятся приложение и команда развертывания.
+# Для локального runner: runs-on: [self-hosted, Linux, X64, credit]

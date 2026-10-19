@@ -25,3 +25,13 @@ build/
 ml/artifacts/*
 !ml/artifacts/README.md
 !ml/artifacts/.gitkeep
+
+# Java, tooling and local runners
+**/target/
+.m2/
+.idea/
+*.iml
+.ci-images/
+devops/runner/local/
+devops/runner/*.tar.gz
+devops/runner/*.token
