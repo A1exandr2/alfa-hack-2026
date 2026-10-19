@@ -2,7 +2,7 @@
 
 ## CI
 
-Конфигурация: `.github/workflows/ci.yml`. Репозиторий на GitHub, поэтому используется GitHub Actions. На push в main и PR запускаются Gitleaks, Semgrep и Trivy зависимостей. Проверки написаны прямо в workflow, без промежуточных shell-скриптов.
+Конфигурация: `.github/workflows/ci.yml`. Репозиторий на GitHub, поэтому используется GitHub Actions. На локальном runner `credit-local` (labels: `self-hosted`, `Linux`, `X64`, `credit`) на push в main и PR из этого репозитория запускаются Gitleaks, Semgrep и Trivy зависимостей. Проверки написаны прямо в workflow, без промежуточных shell-скриптов.
 
 Заготовки Maven, Python lint и Docker build/scan выключены. После появления кода включайте нужные repository variables в Settings → Secrets and variables → Actions → Variables:
 
@@ -37,8 +37,8 @@ AI-review удален. Проверки Alloy/Loki и старого проек
 
 Runner для Docker-задач должен иметь доступ к Docker: `docker info` должен работать от пользователя службы. Если пользователь еще не в группе docker, добавьте его через `sudo usermod -aG docker "$USER"`, затем перелогиньтесь и перезапустите службу. Группа docker дает административные возможности на хосте.
 
-Чтобы отправить job на этот runner, укажите `runs-on: [self-hosted, Linux, X64, credit]`. Пока CI работает на GitHub-hosted runner; локальный зарезервирован для будущего deploy из main. Не запускайте на своем компьютере jobs из чужих PR.
+Чтобы отправить job на этот runner, укажите `runs-on: [self-hosted, Linux, X64, credit]`. Все текущие jobs уже настроены на локальный runner. PR из чужих fork отключены на уровне условий jobs. Не запускайте на своем компьютере jobs из чужих PR.
 
 Документация: https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners
 
-Runner пока не зарегистрирован. Из среды агента скачивание и доступ к Docker заблокированы; команды регистрации выполняются в локальном терминале владельца.
+Runner зарегистрирован владельцем, работает как systemd-служба и отображается в GitHub со статусом Idle. Из среды агента доступ к Docker заблокирован; фактический прогон CI проверяется после push.

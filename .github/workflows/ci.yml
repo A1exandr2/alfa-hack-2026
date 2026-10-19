@@ -14,11 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 # Сейчас включен security. Build/lint/docker включим после появления кода.
-# CI работает на GitHub; локальный runner подключим к deploy, когда он появится.
+# Все jobs выполняются на credit-local. PR из чужих fork не запускаются на локальном ПК.
 jobs:
   gitleaks:
     name: Security / Gitleaks
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 10
     steps:
       - name: Checkout full history
@@ -29,12 +30,15 @@ jobs:
       - name: Scan secrets
         run: |
           docker run --rm -v "$PWD:/repo:ro" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
             zricethezav/gitleaks:v8.18.2 \
             detect --source=/repo --redact --verbose
 
   semgrep:
     name: Security / Semgrep
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +53,8 @@ jobs:
 
   trivy-dependencies:
     name: Security / Trivy dependencies
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -65,8 +70,8 @@ jobs:
   # Заготовки: включать только после добавления соответствующего кода.
   compile-check:
     name: Build / Maven
-    if: vars.ENABLE_JAVA_CI == 'true'
-    runs-on: ubuntu-latest
+    if: vars.ENABLE_JAVA_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -79,27 +84,22 @@ jobs:
 
   python-lint:
     name: Lint / Python
-    if: vars.ENABLE_PYTHON_CI == 'true'
-    runs-on: ubuntu-latest
+    if: vars.ENABLE_PYTHON_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install linters
-        run: pip install flake8==7.1.2 black==25.1.0
       - name: Check Python style
         run: |
-          flake8 --max-line-length=100 ml
-          black --check ml
+          docker run --rm -v "$PWD:/app:ro" -w /app python:3.11-slim \
+            sh -ec 'pip install flake8==7.1.2 black==25.1.0; flake8 --max-line-length=100 ml; black --check ml'
 
   checkov:
     name: Security / Checkov Dockerfiles
-    if: vars.ENABLE_DOCKER_CI == 'true'
-    runs-on: ubuntu-latest
+    if: vars.ENABLE_DOCKER_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -113,9 +113,9 @@ jobs:
 
   docker-build-and-scan:
     name: Docker / Build and Trivy scan
-    if: vars.ENABLE_DOCKER_CI == 'true'
+    if: vars.ENABLE_DOCKER_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [gitleaks, semgrep, trivy-dependencies, checkov]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -137,4 +137,3 @@ jobs:
             "credit-${{ matrix.component }}:${{ github.sha }}"
 
 # Deploy добавим, когда появятся приложение и команда развертывания.
-# Для локального runner: runs-on: [self-hosted, Linux, X64, credit]
