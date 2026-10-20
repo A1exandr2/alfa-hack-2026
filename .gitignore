@@ -35,3 +35,6 @@ ml/artifacts/*
 devops/runner/local/
 devops/runner/*.tar.gz
 devops/runner/*.token
+
+# Data
+data/*.csv
