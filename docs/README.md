@@ -4,3 +4,4 @@
 
 - [DevOps: запуск, CI/CD и локальный runner](devops.md).
 - [API-контракт: авторизация](api.md).
+- [Backend: локальная конфигурация и база данных](backend.md).
