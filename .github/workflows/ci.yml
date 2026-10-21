@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -13,7 +13,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Сейчас включен security. Build/lint/docker включим после появления кода.
+# Security и Docker integration tests запускаются автоматически.
+# Дополнительные проверки включаются через repository variables.
 # Все jobs выполняются на credit-local. PR из чужих fork не запускаются на локальном ПК.
 jobs:
   gitleaks:
