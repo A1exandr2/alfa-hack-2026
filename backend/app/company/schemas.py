@@ -1,7 +1,8 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LinkCompanyRequest(BaseModel):
@@ -39,3 +40,21 @@ class FinancialsResponse(BaseModel):
     current_debt: float
     updated_at: datetime
     source: str
+
+
+class FinancialsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revenue_annual: Decimal | None = Field(default=None, ge=Decimal("0"))
+    profit_annual: Decimal | None = None
+    expenses_annual: Decimal | None = Field(default=None, ge=Decimal("0"))
+    employees: int | None = Field(default=None, ge=0)
+    current_debt: Decimal | None = Field(default=None, ge=Decimal("0"))
+
+    @model_validator(mode="after")
+    def validate_changes(self) -> "FinancialsUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one financial field must be provided")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("Financial fields cannot be null")
+        return self

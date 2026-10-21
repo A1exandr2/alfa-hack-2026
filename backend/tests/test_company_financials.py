@@ -78,3 +78,141 @@ async def test_get_financials_loads_demo_data_and_persists_it() -> None:
                     await session.delete(company)
             await session.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_financials_updates_only_submitted_fields() -> None:
+    email = f"{uuid4()}@example.com"
+    inn = str(uuid4().int)[:10]
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            register = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": email,
+                    "password": "StrongPass123!",
+                    "full_name": "Иван Иванов",
+                },
+            )
+            assert register.status_code == 201
+            headers = {
+                "Authorization": f"Bearer {register.json()['access_token']}"
+            }
+            link = await client.post(
+                "/api/v1/company/link",
+                headers=headers,
+                json={"inn": inn},
+            )
+            assert link.status_code == 200
+            initial = await client.get(
+                "/api/v1/company/financials", headers=headers
+            )
+            assert initial.status_code == 200
+
+            response = await client.patch(
+                "/api/v1/company/financials",
+                headers=headers,
+                json={
+                    "revenue_annual": 13_000_000,
+                    "profit_annual": -500_000,
+                    "employees": 9,
+                },
+            )
+
+        assert response.status_code == 200
+        updated = response.json()
+        assert updated["revenue_annual"] == 13_000_000.0
+        assert updated["profit_annual"] == -500_000.0
+        assert updated["expenses_annual"] == 10_400_000.0
+        assert updated["employees"] == 9
+        assert updated["current_debt"] == 800_000.0
+        assert updated["source"] == "USER_VERIFIED"
+        assert updated["updated_at"] != initial.json()["updated_at"]
+    finally:
+        async with session_factory() as session:
+            user = await session.scalar(select(User).where(User.email == email))
+            company_id = user.company_id if user is not None else None
+            if user is not None:
+                await session.delete(user)
+            if company_id is not None:
+                financials = await session.get(Financials, company_id)
+                if financials is not None:
+                    await session.delete(financials)
+                company = await session.get(Company, company_id)
+                if company is not None:
+                    await session.delete(company)
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_financials_rejects_invalid_payloads_without_changing_data() -> None:
+    email = f"{uuid4()}@example.com"
+    inn = str(uuid4().int)[:10]
+    invalid_payloads = [
+        {"revenue_annual": -1},
+        {"expenses_annual": -1},
+        {"current_debt": -1},
+        {"employees": -1},
+        {"unknown_field": 1},
+        {"profit_annual": None},
+        {},
+    ]
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            register = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": email,
+                    "password": "StrongPass123!",
+                    "full_name": "Иван Иванов",
+                },
+            )
+            assert register.status_code == 201
+            headers = {
+                "Authorization": f"Bearer {register.json()['access_token']}"
+            }
+            link = await client.post(
+                "/api/v1/company/link",
+                headers=headers,
+                json={"inn": inn},
+            )
+            assert link.status_code == 200
+            original = await client.get(
+                "/api/v1/company/financials", headers=headers
+            )
+            assert original.status_code == 200
+
+            for payload in invalid_payloads:
+                response = await client.patch(
+                    "/api/v1/company/financials",
+                    headers=headers,
+                    json=payload,
+                )
+                assert response.status_code == 422
+
+            unchanged = await client.get(
+                "/api/v1/company/financials", headers=headers
+            )
+            assert unchanged.json() == original.json()
+    finally:
+        async with session_factory() as session:
+            user = await session.scalar(select(User).where(User.email == email))
+            company_id = user.company_id if user is not None else None
+            if user is not None:
+                await session.delete(user)
+            if company_id is not None:
+                financials = await session.get(Financials, company_id)
+                if financials is not None:
+                    await session.delete(financials)
+                company = await session.get(Company, company_id)
+                if company is not None:
+                    await session.delete(company)
+            await session.commit()
+        await engine.dispose()
