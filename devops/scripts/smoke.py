@@ -1,6 +1,5 @@
 """Exercise the public gateway and persist one uniquely named demo user."""
-import json
-from urllib.request import Request, urlopen
+import httpx
 from uuid import uuid4
 
 base = 'http://nginx:8080'
@@ -9,10 +8,14 @@ def request(path, payload=None, token=None):
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
-    data = json.dumps(payload).encode() if payload else None
-    with urlopen(Request(base + path, data=data, headers=headers), timeout=10) as response:
-        body = response.read()
-        return json.loads(body) if 'application/json' in response.headers.get('Content-Type', '') else body
+    # Fixed Docker service origin; no file:// support or redirect following.
+    with httpx.Client(base_url=base, timeout=10, follow_redirects=False, trust_env=False) as client:
+        response = client.request(
+            'POST' if payload is not None else 'GET', path,
+            json=payload, headers=headers,
+        )
+        response.raise_for_status()
+        return response.json() if 'application/json' in response.headers.get('Content-Type', '') else response.content
 
 assert request('/api/v1/ready')['database'] == 'ok'
 assert request('/api/v1/health')['status'] == 'ok'

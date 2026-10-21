@@ -19,7 +19,7 @@ pluggy==1.7.0
 pydantic==2.14.1
 pydantic-settings==2.7.1
 pydantic_core==2.50.1
-PyJWT==2.10.1
+PyJWT==2.14.0
 pytest==8.3.4
 pytest-asyncio==0.25.3
 python-dotenv==1.2.4
