@@ -14,6 +14,7 @@ def test_user_belongs_to_company() -> None:
 
     assert str(company_id.type) == "UUID"
     assert list(company_id.foreign_keys)[0].target_fullname == "companies.id"
+    assert company_id.nullable is True
 
 
 def test_financials_have_database_level_money_constraints() -> None:

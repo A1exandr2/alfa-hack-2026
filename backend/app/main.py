@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.company.router import router as company_router
 from app.database import engine
 
 from app.auth.router import router as auth_router
@@ -15,6 +16,7 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(auth_router)
+app.include_router(company_router)
 
 
 @app.get("/api/v1/health", tags=["system"])

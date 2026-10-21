@@ -24,6 +24,9 @@ class Company(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
     director_name: Mapped[str] = mapped_column(String(255), nullable=True)
     okved: Mapped[str] = mapped_column(String(16), nullable=True)
+    data_source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="DEMO"
+    )
 
     users: Mapped[list["User"]] = relationship(back_populates="company")
     financials: Mapped["Financials"] = relationship(
@@ -40,11 +43,11 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    company_id: Mapped[UUID] = mapped_column(
-        PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    company_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
     )
 
-    company: Mapped[Company] = relationship(back_populates="users")
+    company: Mapped[Company | None] = relationship(back_populates="users")
 
 
 class Financials(Base):

@@ -23,21 +23,13 @@ python3 -m venv .venv
 cd ..
 ```
 
-Скопировать настройки:
+Создать локальный `.env` со случайными паролем PostgreSQL и JWT-ключом:
 
 ```bash
-cp .env.example .env
+make init
 ```
 
-Файл `.env` не коммитить. Для локального запуска используются:
-
-```text
-DATABASE_URL=postgresql+asyncpg://credit:credit@localhost:55432/credit
-JWT_SECRET=local-development-secret-change-me
-JWT_EXPIRATION_MINUTES=60
-```
-
-Для общей или production-среды `JWT_SECRET` нужно заменить на собственный секрет.
+Файл `.env` содержит локальные секреты и не коммитится. `.env.example` секретов не содержит; не копируйте его напрямую вместо `make init`.
 
 ## 2. Запустить PostgreSQL
 
@@ -45,9 +37,7 @@ JWT_EXPIRATION_MINUTES=60
 
 ```bash
 docker run -d --name credit-postgres \
-  -e POSTGRES_USER=credit \
-  -e POSTGRES_PASSWORD=credit \
-  -e POSTGRES_DB=credit \
+  --env-file .env \
   -p 55432:5432 \
   postgres:16-alpine
 ```
@@ -124,7 +114,7 @@ curl http://127.0.0.1:8080/api/v1/health
 
 ## 6. Ручная проверка регистрации, login и `/me`
 
-Регистрация принимает ИНН. Backend автоматически находит компанию по ИНН или получает её данные через локальный Mock Gateway и создаёт компанию в PostgreSQL. Предварительно добавлять компанию SQL-командой не нужно.
+Регистрация создаёт пользователя без привязки компании. После регистрации компания привязывается отдельным запросом по ИНН через интерфейс `CompanyProvider`; сейчас используется синтетический `DemoCompanyProvider`.
 
 ### Регистрация
 
@@ -134,8 +124,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/auth/register \
   -d '{
     "email": "ivan@example.com",
     "password": "StrongPass123!",
-    "full_name": "Иван Иванов",
-    "inn": "7700000000"
+    "full_name": "Иван Иванов"
   }'
 ```
 
@@ -149,7 +138,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/auth/register \
     "id": "uuid",
     "email": "ivan@example.com",
     "full_name": "Иван Иванов",
-    "company_id": "uuid"
+    "company_id": null
   },
   "access_token": "JWT",
   "token_type": "bearer"
@@ -157,6 +146,17 @@ curl -X POST http://127.0.0.1:8080/api/v1/auth/register \
 ```
 
 Скопируйте значение `access_token` для следующих запросов. Не добавляйте JWT в git или публичные сообщения.
+
+### Привязка компании
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/company/link \
+  -H 'Authorization: Bearer YOUR_JWT_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"inn": "7700000000"}'
+```
+
+Ответ содержит компанию с `data_source: "DEMO"`. После привязки её можно получить через `GET /api/v1/company`.
 
 ### Login
 
@@ -203,7 +203,7 @@ curl -i -X POST http://127.0.0.1:8080/api/v1/auth/login \
 curl -i http://127.0.0.1:8080/api/v1/auth/me
 ```
 
-Регистрация с тем же email должна вернуть `409`. ИНН должен содержать 10 или 12 цифр; иначе backend вернёт `422`.
+Регистрация с тем же email должна вернуть `409`. При привязке ИНН должен содержать 10 или 12 цифр; иначе backend вернёт `422`.
 
 ## 7. Swagger UI
 
@@ -226,7 +226,8 @@ curl -i http://127.0.0.1:8080/api/v1/auth/me
 Тесты используют локальную PostgreSQL и проверяют:
 
 - хеширование паролей;
-- регистрацию пользователя и автоматическое создание компании;
+- регистрацию пользователя без компании и последующую привязку через demo provider;
+- получение связанной компании;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;
@@ -251,6 +252,8 @@ GET  /api/v1/health
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 GET  /api/v1/auth/me
+POST /api/v1/company/link
+GET  /api/v1/company
 ```
 
-Endpoints компании, кредитных продуктов, заявок и решений будут добавляться следующими вертикальными срезами.
+Финансовые данные, кредитные продукты, заявки и решения будут добавляться следующими вертикальными срезами.

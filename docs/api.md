@@ -48,7 +48,7 @@ POST /api/v1/auth/register
 Content-Type: application/json
 ```
 
-Backend по ИНН находит существующую компанию или получает её данные через локальный Mock Gateway и создаёт запись в PostgreSQL.
+Регистрация создаёт пользователя без компании. Привязка компании по ИНН выполняется отдельным запросом `POST /api/v1/company/link` после входа.
 
 Запрос:
 
@@ -56,8 +56,7 @@ Backend по ИНН находит существующую компанию и�
 {
   "email": "ivan@example.com",
   "password": "StrongPass123!",
-  "full_name": "Иван Иванов",
-  "inn": "7700000000"
+  "full_name": "Иван Иванов"
 }
 ```
 
@@ -69,7 +68,7 @@ Backend по ИНН находит существующую компанию и�
     "id": "00000000-0000-0000-0000-000000000010",
     "email": "ivan@example.com",
     "full_name": "Иван Иванов",
-    "company_id": "00000000-0000-0000-0000-000000000001"
+    "company_id": null
   },
   "access_token": "<jwt>",
   "token_type": "bearer"
@@ -80,7 +79,7 @@ Backend по ИНН находит существующую компанию и�
 
 - `400 Bad Request` — некорректные данные;
 - `409 Conflict` — пользователь с таким email уже существует;
-- `422 Unprocessable Entity` — некорректный ИНН или другие данные запроса.
+- `422 Unprocessable Entity` — ошибка валидации данных запроса.
 
 ### Вход
 
@@ -109,17 +108,17 @@ Content-Type: application/json
 
 ```http
 GET /api/v1/auth/me
-Authorization: Bearer <access_token>
+Authorization: Bearer ***
 ```
 
-Ответ `200 OK`:
+Ответ `200 OK`. До привязки компании поле `company_id` равно `null`; после привязки содержит UUID:
 
 ```json
 {
   "id": "00000000-0000-0000-0000-000000000010",
   "email": "ivan@example.com",
   "full_name": "Иван Иванов",
-  "company_id": "00000000-0000-0000-0000-000000000001"
+  "company_id": null
 }
 ```
 
@@ -130,7 +129,32 @@ Authorization: Bearer <access_token>
 
 ## Компания
 
-Все endpoints раздела работают только с компанией пользователя из JWT. Передавать `company_id` в URL для MVP не требуется.
+`POST /api/v1/company/link` привязывает компанию к текущему пользователю из JWT. Остальные endpoints раздела возвращают только данные связанной компании; передавать `company_id` в URL для MVP не требуется.
+
+### Привязка компании
+
+```http
+POST /api/v1/company/link
+Authorization: Bearer ***
+Content-Type: application/json
+```
+
+Запрос:
+
+```json
+{
+  "inn": "7700000000"
+}
+```
+
+Backend ищет уже сохранённую компанию или запрашивает её через `CompanyProvider`. Сейчас подключён `DemoCompanyProvider`; он возвращает явно синтетическую запись. Ответ `200 OK` содержит данные компании и `data_source: "DEMO"`.
+
+Ошибки:
+
+- `401 Unauthorized` — токен отсутствует или недействителен;
+- `409 Conflict` — у пользователя уже привязана другая компания;
+- `422 Unprocessable Entity` — ИНН содержит не 10 или 12 цифр;
+- `502 Bad Gateway` — провайдер компании недоступен или вернул данные с другим ИНН.
 
 ### Данные компании
 
@@ -144,13 +168,14 @@ Authorization: Bearer <access_token>
 ```json
 {
   "id": "00000000-0000-0000-0000-000000000001",
-  "name": "ООО «Ромашка»",
+  "name": "Демо-компания 7700000000",
   "inn": "7700000000",
-  "ogrn": "1027700000000",
-  "registration_date": "2015-04-20",
+  "ogrn": null,
+  "registration_date": null,
   "status": "ACTIVE",
-  "director_name": "Иван Иванов",
-  "okved": "62.01"
+  "director_name": null,
+  "okved": null,
+  "data_source": "DEMO"
 }
 ```
 
@@ -209,4 +234,4 @@ Content-Type: application/json
 
 ## Текущий статус реализации
 
-Реализованы health-check и полный базовый auth-срез: регистрация пользователя, login и получение текущего пользователя по JWT. Регистрация проверяет компанию, хеширует пароль и сохраняет пользователя в PostgreSQL. Остальные endpoints добавляются отдельными вертикальными срезами.
+Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка компании по ИНН через интерфейс `CompanyProvider` и получение связанной компании. Demo provider маркирует синтетические данные как `DEMO`; финансовые данные, продукты и заявки будут добавляться отдельными срезами.

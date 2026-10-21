@@ -12,8 +12,7 @@ from app.auth.schemas import (
 )
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.database import get_db_session
-from app.mock_gateway import lookup_company
-from app.models import Company, User
+from app.models import User
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -37,24 +36,10 @@ async def register(
             detail="User with this email already exists",
         )
 
-    company = await session.scalar(select(Company).where(Company.inn == payload.inn))
-    if company is None:
-        company_data = await lookup_company(payload.inn)
-        company = Company(
-            name=company_data.name,
-            inn=company_data.inn,
-            ogrn=company_data.ogrn,
-            director_name=company_data.director_name,
-            okved=company_data.okved,
-        )
-        session.add(company)
-        await session.flush()
-
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
         full_name=payload.full_name.strip(),
-        company_id=company.id,
     )
     session.add(user)
 
