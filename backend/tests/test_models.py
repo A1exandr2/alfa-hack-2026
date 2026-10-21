@@ -25,7 +25,9 @@ def test_financials_have_database_level_money_constraints() -> None:
     }
 
     assert "revenue_annual >= 0" in constraints
+    assert "expenses_annual >= 0" in constraints
     assert "current_debt >= 0" in constraints
+    assert "employees >= 0" in constraints
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:

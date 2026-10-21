@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -27,3 +27,15 @@ class CompanyResponse(BaseModel):
     director_name: str | None
     okved: str | None
     data_source: str
+
+
+class FinancialsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    revenue_annual: float
+    profit_annual: float
+    expenses_annual: float
+    employees: int
+    current_debt: float
+    updated_at: datetime
+    source: str

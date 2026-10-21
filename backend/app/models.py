@@ -2,7 +2,16 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -54,7 +63,9 @@ class Financials(Base):
     __tablename__ = "financials"
     __table_args__ = (
         CheckConstraint("revenue_annual >= 0", name="ck_financials_revenue_nonnegative"),
+        CheckConstraint("expenses_annual >= 0", name="ck_financials_expenses_nonnegative"),
         CheckConstraint("current_debt >= 0", name="ck_financials_debt_nonnegative"),
+        CheckConstraint("employees >= 0", name="ck_financials_employees_nonnegative"),
     )
 
     company_id: Mapped[UUID] = mapped_column(
@@ -66,6 +77,10 @@ class Financials(Base):
     profit_annual: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False, default=0
     )
+    expenses_annual: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=0
+    )
+    employees: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_debt: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), nullable=False, default=0
     )

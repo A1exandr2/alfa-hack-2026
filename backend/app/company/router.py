@@ -4,14 +4,23 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
-from app.company.schemas import CompanyResponse, LinkCompanyRequest
+from app.company.schemas import (
+    CompanyResponse,
+    FinancialsResponse,
+    LinkCompanyRequest,
+)
 from app.database import get_db_session
 from app.integrations.company import (
     CompanyProvider,
     CompanyProviderError,
     get_company_provider,
 )
-from app.models import Company, User
+from app.integrations.financials import (
+    FinancialProvider,
+    FinancialProviderError,
+    get_financial_provider,
+)
+from app.models import Company, Financials, User
 
 
 router = APIRouter(prefix="/api/v1/company", tags=["company"])
@@ -92,3 +101,58 @@ async def link_company(
         ) from error
 
     return CompanyResponse.model_validate(company)
+
+
+@router.get("/financials", response_model=FinancialsResponse)
+async def get_company_financials(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    provider: FinancialProvider = Depends(get_financial_provider),
+) -> FinancialsResponse:
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company is not linked",
+        )
+
+    financials = await session.get(Financials, user.company_id)
+    if financials is not None:
+        return FinancialsResponse.model_validate(financials)
+
+    company = await session.get(Company, user.company_id)
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    try:
+        data = await provider.get_by_inn(company.inn)
+    except FinancialProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Financial provider is unavailable",
+        ) from error
+
+    financials = Financials(
+        company_id=company.id,
+        revenue_annual=data.revenue_annual,
+        profit_annual=data.profit_annual,
+        expenses_annual=data.expenses_annual,
+        employees=data.employees,
+        current_debt=data.current_debt,
+        source=data.source,
+    )
+    session.add(financials)
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        financials = await session.get(Financials, company.id)
+        if financials is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Financial data could not be saved",
+            ) from error
+
+    return FinancialsResponse.model_validate(financials)

@@ -186,7 +186,7 @@ Authorization: Bearer <access_token>
 
 ### Финансовые данные
 
-Получение сохранённых финансовых показателей:
+Получение финансовых показателей. Если запись ещё не создана, Backend получает синтетические данные через `FinancialProvider`, сохраняет их в PostgreSQL и возвращает с `source: "DEMO"`. Повторные запросы читают сохранённую запись.
 
 ```http
 GET /api/v1/company/financials
@@ -199,13 +199,15 @@ Authorization: Bearer <access_token>
 {
   "revenue_annual": 12500000.00,
   "profit_annual": 2100000.00,
+  "expenses_annual": 10400000.00,
+  "employees": 8,
   "current_debt": 800000.00,
   "updated_at": "2026-01-15T10:30:00Z",
-  "source": "USER_VERIFIED"
+  "source": "DEMO"
 }
 ```
 
-Обновление показателей перед созданием заявки:
+Обновление показателей перед созданием заявки (следующий срез; пока не реализовано):
 
 ```http
 PATCH /api/v1/company/financials
@@ -219,6 +221,8 @@ Content-Type: application/json
 {
   "revenue_annual": 13000000.00,
   "profit_annual": 2300000.00,
+  "expenses_annual": 10700000.00,
+  "employees": 9,
   "current_debt": 750000.00
 }
 ```
@@ -234,4 +238,4 @@ Content-Type: application/json
 
 ## Текущий статус реализации
 
-Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка компании по ИНН через интерфейс `CompanyProvider` и получение связанной компании. Demo provider маркирует синтетические данные как `DEMO`; финансовые данные, продукты и заявки будут добавляться отдельными срезами.
+Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка и просмотр компании через `CompanyProvider`, а также `GET /api/v1/company/financials` через `FinancialProvider`. Синтетические финансовые данные маркируются `DEMO` и сохраняются при первом запросе. PATCH финансов, кредитная история, продукты и заявки будут добавляться отдельными срезами.
