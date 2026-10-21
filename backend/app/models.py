@@ -3,6 +3,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -132,3 +134,27 @@ class CreditHistory(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="DEMO")
 
     company: Mapped[Company] = relationship(back_populates="credit_history")
+
+
+class CreditProduct(Base):
+    __tablename__ = "credit_products"
+    __table_args__ = (
+        CheckConstraint("min_amount >= 0", name="ck_credit_products_min_amount_nonnegative"),
+        CheckConstraint("max_amount >= min_amount", name="ck_credit_products_amount_range"),
+        CheckConstraint("min_term_months > 0", name="ck_credit_products_min_term_positive"),
+        CheckConstraint("max_term_months >= min_term_months", name="ck_credit_products_term_range"),
+        CheckConstraint("interest_rate >= 0", name="ck_credit_products_rate_nonnegative"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    name: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    min_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    max_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    min_term_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_term_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    interest_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    data_source: Mapped[str] = mapped_column(String(32), nullable=False, default="DEMO")

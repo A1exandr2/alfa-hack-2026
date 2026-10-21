@@ -1,12 +1,18 @@
-from sqlalchemy import inspect
+from sqlalchemy import CheckConstraint, inspect
 
-from app.models import Base, Company, CreditHistory, Financials, User
+from app.models import Base, Company, CreditHistory, CreditProduct, Financials, User
 
 
 def test_credit_domain_tables_are_registered() -> None:
     table_names = set(Base.metadata.tables)
 
-    assert table_names == {"companies", "credit_history", "financials", "users"}
+    assert table_names == {
+        "companies",
+        "credit_history",
+        "credit_products",
+        "financials",
+        "users",
+    }
 
 
 def test_user_belongs_to_company() -> None:
@@ -41,6 +47,20 @@ def test_credit_history_has_database_level_nonnegative_constraints() -> None:
     assert "closed_credits >= 0" in constraints
     assert "overdue_count >= 0" in constraints
     assert "overdue_amount >= 0" in constraints
+
+
+def test_credit_products_have_database_level_range_constraints() -> None:
+    constraints = {
+        str(constraint.sqltext)
+        for constraint in CreditProduct.__table_args__
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "min_amount >= 0" in constraints
+    assert "max_amount >= min_amount" in constraints
+    assert "min_term_months > 0" in constraints
+    assert "max_term_months >= min_term_months" in constraints
+    assert "interest_rate >= 0" in constraints
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:

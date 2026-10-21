@@ -231,6 +231,7 @@ curl -i http://127.0.0.1:8080/api/v1/auth/me
 - получение финансовых данных через demo provider с сохранением в PostgreSQL;
 - частичное обновление финансовых данных и валидация значений;
 - получение агрегированной кредитной истории через demo provider;
+- список и карточку demo-кредитного продукта;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;
@@ -260,6 +261,8 @@ GET  /api/v1/company
 GET  /api/v1/company/financials
 PATCH /api/v1/company/financials
 GET  /api/v1/company/credit-history
+GET  /api/v1/credit-products
+GET  /api/v1/credit-products/{product_id}
 ```
 
-Кредитные продукты, заявки и решения будут добавляться следующими вертикальными срезами.
+Заявки и решения будут добавляться следующими вертикальными срезами.
