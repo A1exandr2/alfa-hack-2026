@@ -237,6 +237,28 @@ Content-Type: application/json
 - пустой запрос, `null` вместо значения и неизвестные поля отклоняются;
 - `422 Unprocessable Entity` — ошибка валидации данных.
 
+### Кредитная история
+
+```http
+GET /api/v1/company/credit-history
+Authorization: Bearer ***
+```
+
+Если агрегат ещё не сохранён, Backend запрашивает `CreditHistoryProvider`, сохраняет результат и возвращает его. Сейчас используется `DemoCreditHistoryProvider`; это синтетический агрегат, не реальные данные БКИ.
+
+Ответ `200 OK`:
+
+```json
+{
+  "active_credits": 2,
+  "closed_credits": 5,
+  "overdue_count": 0,
+  "overdue_amount": 0.00,
+  "updated_at": "2026-01-15T10:30:00Z",
+  "source": "DEMO"
+}
+```
+
 ## Текущий статус реализации
 
-Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка и просмотр компании через `CompanyProvider`, а также GET/PATCH финансов через `FinancialProvider`. Синтетические данные маркируются `DEMO`; после пользовательского изменения источник становится `USER_VERIFIED`. Следующие срезы — кредитная история, продукты и заявки.
+Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка и просмотр компании через `CompanyProvider`, GET/PATCH финансов через `FinancialProvider` и просмотр кредитной истории через `CreditHistoryProvider`. Demo-данные маркируются `DEMO`; финансовые показатели после редактирования — `USER_VERIFIED`. Следующие срезы — кредитные продукты и заявки.

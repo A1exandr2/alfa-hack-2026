@@ -42,6 +42,17 @@ class FinancialsResponse(BaseModel):
     source: str
 
 
+class CreditHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    active_credits: int
+    closed_credits: int
+    overdue_count: int
+    overdue_amount: float
+    updated_at: datetime
+    source: str
+
+
 class FinancialsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user
 from app.company.schemas import (
     CompanyResponse,
+    CreditHistoryResponse,
     FinancialsResponse,
     FinancialsUpdateRequest,
     LinkCompanyRequest,
@@ -16,12 +17,17 @@ from app.integrations.company import (
     CompanyProviderError,
     get_company_provider,
 )
+from app.integrations.credit_history import (
+    CreditHistoryProvider,
+    CreditHistoryProviderError,
+    get_credit_history_provider,
+)
 from app.integrations.financials import (
     FinancialProvider,
     FinancialProviderError,
     get_financial_provider,
 )
-from app.models import Company, Financials, User
+from app.models import Company, CreditHistory, Financials, User
 
 
 router = APIRouter(prefix="/api/v1/company", tags=["company"])
@@ -78,6 +84,58 @@ async def _get_or_create_financials(
                 detail="Financial data could not be saved",
             ) from error
     return financials
+
+
+async def _get_or_create_credit_history(
+    user: User,
+    session: AsyncSession,
+    provider: CreditHistoryProvider,
+) -> CreditHistory:
+    if user.company_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company is not linked",
+        )
+
+    credit_history = await session.get(CreditHistory, user.company_id)
+    if credit_history is not None:
+        return credit_history
+
+    company = await session.get(Company, user.company_id)
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    try:
+        data = await provider.get_by_inn(company.inn)
+    except CreditHistoryProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Credit-history provider is unavailable",
+        ) from error
+
+    credit_history = CreditHistory(
+        company_id=company.id,
+        active_credits=data.active_credits,
+        closed_credits=data.closed_credits,
+        overdue_count=data.overdue_count,
+        overdue_amount=data.overdue_amount,
+        source=data.source,
+    )
+    session.add(credit_history)
+    try:
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        credit_history = await session.get(CreditHistory, company.id)
+        if credit_history is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Credit history could not be saved",
+            ) from error
+    return credit_history
 
 
 @router.get("", response_model=CompanyResponse)
@@ -182,3 +240,13 @@ async def update_company_financials(
     await session.commit()
     await session.refresh(financials)
     return FinancialsResponse.model_validate(financials)
+
+
+@router.get("/credit-history", response_model=CreditHistoryResponse)
+async def get_company_credit_history(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    provider: CreditHistoryProvider = Depends(get_credit_history_provider),
+) -> CreditHistoryResponse:
+    credit_history = await _get_or_create_credit_history(user, session, provider)
+    return CreditHistoryResponse.model_validate(credit_history)

@@ -41,6 +41,9 @@ class Company(Base):
     financials: Mapped["Financials"] = relationship(
         back_populates="company", uselist=False
     )
+    credit_history: Mapped["CreditHistory"] = relationship(
+        back_populates="company", uselist=False
+    )
 
 
 class User(Base):
@@ -95,3 +98,37 @@ class Financials(Base):
     )
 
     company: Mapped[Company] = relationship(back_populates="financials")
+
+
+class CreditHistory(Base):
+    __tablename__ = "credit_history"
+    __table_args__ = (
+        CheckConstraint(
+            "active_credits >= 0", name="ck_credit_history_active_nonnegative"
+        ),
+        CheckConstraint(
+            "closed_credits >= 0", name="ck_credit_history_closed_nonnegative"
+        ),
+        CheckConstraint(
+            "overdue_count >= 0", name="ck_credit_history_overdue_nonnegative"
+        ),
+        CheckConstraint(
+            "overdue_amount >= 0", name="ck_credit_history_amount_nonnegative"
+        ),
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), primary_key=True
+    )
+    active_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    closed_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overdue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    overdue_amount: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, default=0
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="DEMO")
+
+    company: Mapped[Company] = relationship(back_populates="credit_history")

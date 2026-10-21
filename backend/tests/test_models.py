@@ -1,12 +1,12 @@
 from sqlalchemy import inspect
 
-from app.models import Base, Company, Financials, User
+from app.models import Base, Company, CreditHistory, Financials, User
 
 
 def test_credit_domain_tables_are_registered() -> None:
     table_names = set(Base.metadata.tables)
 
-    assert table_names == {"companies", "financials", "users"}
+    assert table_names == {"companies", "credit_history", "financials", "users"}
 
 
 def test_user_belongs_to_company() -> None:
@@ -28,6 +28,19 @@ def test_financials_have_database_level_money_constraints() -> None:
     assert "expenses_annual >= 0" in constraints
     assert "current_debt >= 0" in constraints
     assert "employees >= 0" in constraints
+
+
+def test_credit_history_has_database_level_nonnegative_constraints() -> None:
+    constraints = {
+        str(constraint.sqltext)
+        for constraint in CreditHistory.__table__.constraints
+        if hasattr(constraint, "sqltext")
+    }
+
+    assert "active_credits >= 0" in constraints
+    assert "closed_credits >= 0" in constraints
+    assert "overdue_count >= 0" in constraints
+    assert "overdue_amount >= 0" in constraints
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:
