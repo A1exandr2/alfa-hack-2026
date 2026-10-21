@@ -8,7 +8,7 @@ x-backend: &backend
     target: production
   init: true
   environment:
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:-credit}@postgres:5432/${POSTGRES_DB:-credit}
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:?Run make init first}@postgres:5432/${POSTGRES_DB:-credit}
     JWT_SECRET: ${JWT_SECRET:?Run make init first}
     JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
   security_opt: [no-new-privileges:true]
@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-credit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-credit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make init first}
       POSTGRES_DB: ${POSTGRES_DB:-credit}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -77,12 +77,12 @@ services:
     image: postgres:16.10-alpine3.22
     profiles: [test]
     environment:
-      POSTGRES_USER: credit
-      POSTGRES_PASSWORD: credit
+      POSTGRES_USER: ${POSTGRES_USER:-credit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make init first}
       POSTGRES_DB: credit_test
     tmpfs: [/var/lib/postgresql/data]
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U credit -d credit_test]
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d credit_test']
       interval: 2s
       timeout: 3s
       retries: 20
@@ -97,8 +97,8 @@ services:
       dockerfile: backend/Dockerfile
       target: test
     environment:
-      DATABASE_URL: postgresql+asyncpg://credit:credit@test-db:5432/credit_test
-      JWT_SECRET: isolated-test-secret-for-local-tests
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:?Run make init first}@test-db:5432/credit_test
+      JWT_SECRET: ${JWT_SECRET:?Run make init first}
     command: [sh, -ec, 'alembic upgrade head; python -m pytest -q -p no:cacheprovider']
     healthcheck:
       disable: true

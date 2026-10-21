@@ -29,7 +29,7 @@ make check
 make status
 ```
 
-`make up` создаёт локальный `.env` со случайным JWT-ключом, собирает backend и запускает PostgreSQL, миграции Alembic, API и Nginx. Существующий `.env` сохраняется.
+`make up` создаёт локальный `.env` со случайными паролем PostgreSQL и JWT-ключом, собирает backend и запускает PostgreSQL, миграции Alembic, API и Nginx. Существующий `.env` сохраняется; секреты не хранятся в `.env.example` и Git.
 
 - Swagger: http://localhost:8080/docs
 - API: http://localhost:8080/api/v1
