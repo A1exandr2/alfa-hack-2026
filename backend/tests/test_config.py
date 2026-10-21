@@ -1,8 +1,9 @@
 from app.config import Settings
 
 
-def test_settings_use_safe_local_database_defaults() -> None:
-    settings = Settings()
+def test_settings_use_safe_local_database_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    settings = Settings(_env_file=None)
 
     assert settings.app_name == "Smart Credit Cabinet API"
     assert settings.database_url == (

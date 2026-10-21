@@ -1,10 +1,12 @@
 # Backend
 
-Инструкция рассчитана на локальный запуск backend для команды. Docker-файлы проекта (`backend/Dockerfile`, `frontend/Dockerfile`, `ml/Dockerfile`, `devops/Dockerfile`) пока не используются — их собирает DevOps.
+Рекомендуемый запуск всего готового стека из корня: `make up`, затем `make check`. Swagger: http://localhost:8080/docs. Docker применяет миграции автоматически. Подробности: [DevOps](devops.md).
+
+Ниже — альтернативный запуск Python на хосте. Не запускайте его одновременно с Docker-стеком на тех же портах.
 
 ## Требования
 
-- Python 3.14 или совместимая версия;
+- Python 3.12 (версия Docker-образа);
 - Docker для локального PostgreSQL;
 - `curl` для ручной проверки или браузер со Swagger UI.
 

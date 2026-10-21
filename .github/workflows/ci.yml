@@ -109,7 +109,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src \
             bridgecrew/checkov:3.2.471 \
-            -f frontend/Dockerfile -f backend/Dockerfile --framework dockerfile
+            -f backend/Dockerfile --framework dockerfile
 
   docker-build-and-scan:
     name: Docker / Build and Trivy scan
@@ -120,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [frontend, backend]
+        component: [backend]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,3 +137,29 @@ jobs:
             "credit-${{ matrix.component }}:${{ github.sha }}"
 
 # Deploy добавим, когда появятся приложение и команда развертывания.
+
+  docker-smoke:
+    name: Docker / Integration tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: credit-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      APP_PORT: "0"
+      POSTGRES_PORT: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build and start
+        run: make up
+      - name: Backend tests
+        run: make test
+      - name: HTTP smoke through Nginx
+        run: make check
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose --env-file .env logs --tail=100
+      - name: Remove CI containers and volumes
+        if: always()
+        run: docker compose --env-file .env --profile test down --volumes --remove-orphans

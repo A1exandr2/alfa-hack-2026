@@ -17,8 +17,34 @@
 
 Каждый делает задачи в своей ветке от `main`, затем открывает PR в `main`. Документацию обновляем вместе с кодом. Общий запуск будет в корневом `docker-compose.yml`, его собирает DevOps вместе с командой.
 
-Пока в репозитории только начальная структура, приложение еще не реализовано.
+Реализованы FastAPI backend, регистрация, login, JWT, модели PostgreSQL и миграции Alembic. Frontend и ML пока не реализованы.
+
+## Быстрый запуск
+
+Требуются Docker Engine с Compose v2+ (`--wait`), GNU Make и Python 3 на хосте.
+
+```bash
+make up
+make check
+make status
+```
+
+`make up` создаёт локальный `.env` со случайным JWT-ключом, собирает backend и запускает PostgreSQL, миграции Alembic, API и Nginx. Существующий `.env` сохраняется.
+
+- Swagger: http://localhost:8080/docs
+- API: http://localhost:8080/api/v1
+- Проверка базы: http://localhost:8080/api/v1/ready
+
+```bash
+make logs SERVICE=backend
+make test
+make down
+```
+
+`make down` сохраняет базу в Docker volume. `make test` использует отдельную временную БД. `make check` проверяет полный auth-сценарий через Nginx и создаёт одного уникального demo-пользователя. Все команды: `make help`.
+
+Параметры портов и локальные настройки — в `.env`. При занятом `8080` измените `APP_PORT`, при занятом `55432` — `POSTGRES_PORT`, затем выполните `make up`.
 
 ## DevOps
 
-Локальная проверка секретов: `make gitleaks`. Инструкции и статус проверок: [docs/devops.md](docs/devops.md).
+Локальная проверка секретов: `make gitleaks`. Архитектура запуска, команды и статус CI: [docs/devops.md](docs/devops.md).
