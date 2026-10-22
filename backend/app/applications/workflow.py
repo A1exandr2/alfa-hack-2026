@@ -1,12 +1,18 @@
+from datetime import date
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from ml.facade import score_and_explain
+
+from app.applications.schemas import ApplicationRiskAssessment
 from app.applications.service import (
     ApplicationDataMissingError,
     ApplicationDataProviderError,
     ApplicationNotFoundError,
+    ApplicationScoringError,
     ApplicationSubmissionConflictError,
     _validate_terms,
     get_application,
@@ -25,6 +31,67 @@ from app.models import (
     CreditProduct,
     Financials,
 )
+
+
+def _build_scoring_input(
+    application: Application,
+    company: Company,
+    financials: Financials,
+    credit_history: CreditHistory,
+) -> tuple[dict[str, float], dict[str, float], dict[str, float | int], float, str]:
+    registration_date = company.registration_date
+    today = date.today()
+    revenue = float(financials.revenue_annual)
+    if registration_date is None or registration_date > today or revenue <= 0:
+        raise ApplicationDataMissingError()
+
+    company_features = {
+        "company_age": (today - registration_date).days / 365.25,
+    }
+    financial_features = {
+        "revenue": revenue,
+        "profit_margin": float(financials.profit_annual) / revenue,
+    }
+    credit_features: dict[str, float | int] = {
+        "has_overdue": int(
+            credit_history.overdue_count > 0 or credit_history.overdue_amount > 0
+        ),
+        "debt_load": float(financials.current_debt) / revenue,
+    }
+    return (
+        company_features,
+        financial_features,
+        credit_features,
+        float(application.requested_amount),
+        application.purpose,
+    )
+
+
+async def _score_application(
+    application: Application,
+    company: Company,
+    financials: Financials,
+    credit_history: CreditHistory,
+) -> ApplicationRiskAssessment:
+    (
+        company_features,
+        financial_features,
+        credit_features,
+        loan_amount,
+        user_query,
+    ) = _build_scoring_input(application, company, financials, credit_history)
+    try:
+        result = await run_in_threadpool(
+            score_and_explain,
+            company=company_features,
+            financials=financial_features,
+            credit=credit_features,
+            loan_amount=loan_amount,
+            user_query=user_query,
+        )
+        return ApplicationRiskAssessment.model_validate(result)
+    except Exception as error:
+        raise ApplicationScoringError() from error
 
 
 async def _get_or_fetch_financials(
@@ -88,6 +155,7 @@ def _build_snapshot_payload(
     product: CreditProduct,
     financials: Financials,
     credit_history: CreditHistory,
+    risk_assessment: ApplicationRiskAssessment,
 ) -> dict[str, object]:
     return {
         "application": {
@@ -138,6 +206,7 @@ def _build_snapshot_payload(
             "interest_rate": str(product.interest_rate),
             "data_source": product.data_source,
         },
+        "risk_assessment": risk_assessment.model_dump(mode="json"),
     }
 
 
@@ -189,14 +258,23 @@ async def submit_application(
         session.add(credit_history)
     await session.flush()
 
+    risk_assessment = await _score_application(
+        application, company, financials, credit_history
+    )
+
     snapshot_id = uuid4()
     session.add(
         ApplicationSnapshot(
             id=snapshot_id,
             application_id=application.id,
-            schema_version=1,
+            schema_version=2,
             payload=_build_snapshot_payload(
-                application, company, product, financials, credit_history
+                application,
+                company,
+                product,
+                financials,
+                credit_history,
+                risk_assessment,
             ),
         )
     )
@@ -213,7 +291,7 @@ async def submit_application(
         (
             "DATA_ENRICHMENT",
             "SCORING",
-            "READY_FOR_SCORING",
+            "RISK_ASSESSMENT_COMPLETED",
             "SYSTEM",
         ),
     )
@@ -240,9 +318,13 @@ async def submit_application(
                 details=(
                     {
                         "snapshot_id": str(snapshot_id),
-                        "snapshot_schema_version": 1,
+                        "snapshot_schema_version": 2,
+                        "risk_score": risk_assessment.risk_score,
+                        "risk_level": risk_assessment.risk_level,
+                        "top_factors": risk_assessment.top_factors,
+                        "ai_advice_source": risk_assessment.ai_advice.source,
                     }
-                    if event_type == "READY_FOR_SCORING"
+                    if event_type == "RISK_ASSESSMENT_COMPLETED"
                     else {}
                 ),
             )

@@ -71,6 +71,13 @@ class ApplicationDataMissingError(ApplicationError):
         super().__init__("Application data is incomplete")
 
 
+class ApplicationScoringError(ApplicationError):
+    status_code = 502
+
+    def __init__(self) -> None:
+        super().__init__("Application risk scoring could not be completed")
+
+
 async def _get_active_product(
     session: AsyncSession, product_id: UUID
 ) -> CreditProduct:

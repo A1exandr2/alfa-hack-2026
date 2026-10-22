@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -82,3 +83,20 @@ class ApplicationEventResponse(BaseModel):
     actor_user_id: UUID | None
     occurred_at: datetime
     details: dict[str, object]
+
+
+class ScoringAdviceSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["AI", "Fallback_Rules"]
+    data: dict[str, object]
+
+
+class ApplicationRiskAssessment(BaseModel):
+    # The facade also returns `decision`; Backend deliberately ignores it.
+    model_config = ConfigDict(extra="ignore")
+
+    risk_score: float = Field(ge=0, le=100, allow_inf_nan=False)
+    risk_level: Literal["Low", "Medium", "High"]
+    top_factors: list[str]
+    ai_advice: ScoringAdviceSnapshot

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -7,11 +8,13 @@ from sqlalchemy import inspect, select, text
 
 from app.database import engine, session_factory
 from app.main import app
+import app.applications.workflow as application_workflow
 from app.integrations.credit_history import (
     CreditHistoryData,
     CreditHistoryProviderError,
     get_credit_history_provider,
 )
+from ml.facade import score_and_explain as ml_score_and_explain
 
 from app.models import (
     Application,
@@ -325,8 +328,24 @@ async def test_application_requires_linked_company_and_product_limits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_application_prepares_data_and_moves_to_scoring() -> None:
+async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch) -> None:
     email = ""
+    scoring_inputs: list[dict[str, Any]] = []
+
+    def unavailable_ollama(self, **kwargs: Any) -> None:
+        raise ConnectionError("Ollama is offline for this test")
+
+    def fake_score_and_explain(**kwargs: Any) -> dict[str, Any]:
+        scoring_inputs.append(kwargs)
+        result = ml_score_and_explain(**kwargs)
+        result["decision"] = "REJECTED"
+        return result
+
+    monkeypatch.setattr("ollama.Client.chat", unavailable_ollama)
+    monkeypatch.setattr(
+        application_workflow, "score_and_explain", fake_score_and_explain,
+        raising=False,
+    )
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -376,6 +395,8 @@ async def test_submit_application_prepares_data_and_moves_to_scoring() -> None:
             "SCORING",
         ]
         assert history.json()[0]["event_type"] == "APPLICATION_DRAFT_CREATED"
+        assert history.json()[-1]["event_type"] == "RISK_ASSESSMENT_COMPLETED"
+        assert history.json()[-1]["details"]["risk_level"] == "Low"
         assert history.json()[0]["actor_type"] == "USER"
         assert history.json()[1]["actor_type"] == "USER"
         assert all(event["actor_type"] == "SYSTEM" for event in history.json()[2:])
@@ -400,7 +421,7 @@ async def test_submit_application_prepares_data_and_moves_to_scoring() -> None:
         assert saved_application is not None
         assert saved_application.status == "SCORING"
         assert snapshot is not None
-        assert snapshot.schema_version == 1
+        assert snapshot.schema_version == 2
         assert snapshot.payload["financials"]["revenue_annual"] == "12500000.00"
         assert snapshot.payload["financials"]["source"] == "DEMO"
         assert snapshot.payload["credit_history"]["source"] == "DEMO"
@@ -410,6 +431,28 @@ async def test_submit_application_prepares_data_and_moves_to_scoring() -> None:
         assert saved_history is not None
         assert saved_history.source == "DEMO"
         assert len(events) == 5
+        assert len(scoring_inputs) == 1
+        scoring_input = scoring_inputs[0]
+        assert scoring_input["company"]["company_age"] > 0
+        assert scoring_input["financials"] == {
+            "revenue": 12_500_000.0,
+            "profit_margin": 2_100_000.0 / 12_500_000.0,
+        }
+        assert scoring_input["credit"] == {
+            "has_overdue": 0,
+            "debt_load": 800_000.0 / 12_500_000.0,
+        }
+        assert scoring_input["loan_amount"] == float(
+            Decimal(created.json()["requested_amount"])
+        )
+        assert scoring_input["user_query"] == "Пополнение оборотных средств"
+        risk_assessment = snapshot.payload["risk_assessment"]
+        assert risk_assessment["risk_score"] == 25.0
+        assert risk_assessment["risk_level"] == "Low"
+        assert "decision" not in risk_assessment
+        assert risk_assessment["ai_advice"]["source"] == "Fallback_Rules"
+        assert events[-1].event_type == "RISK_ASSESSMENT_COMPLETED"
+        assert events[-1].details["risk_score"] == 25.0
     finally:
         if email:
             await _cleanup_user(email)
@@ -468,6 +511,64 @@ async def test_submission_provider_failure_leaves_application_unchanged() -> Non
         assert events[0].to_status == "DRAFT"
     finally:
         app.dependency_overrides.pop(get_credit_history_provider, None)
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scoring_failure_rolls_back_submission(monkeypatch) -> None:
+    email = ""
+
+    def failing_score(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("scoring unavailable")
+
+    monkeypatch.setattr(
+        application_workflow,
+        "score_and_explain",
+        failing_score,
+        raising=False,
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            email, headers = await _register_company_user(client)
+            products = await client.get("/api/v1/credit-products")
+            created = await _create_draft(client, headers, products.json()[0])
+            application_id = created.json()["id"]
+            company_id = created.json()["company_id"]
+
+            response = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=headers,
+            )
+
+        assert response.status_code == 502
+        async with session_factory() as session:
+            saved_application = await session.get(Application, application_id)
+            snapshot = await session.scalar(
+                select(ApplicationSnapshot).where(
+                    ApplicationSnapshot.application_id == application_id
+                )
+            )
+            events = list(
+                await session.scalars(
+                    select(ApplicationEvent).where(
+                        ApplicationEvent.application_id == application_id
+                    )
+                )
+            )
+            saved_financials = await session.get(Financials, company_id)
+            saved_history = await session.get(CreditHistory, company_id)
+
+        assert saved_application is not None
+        assert saved_application.status == "DRAFT"
+        assert snapshot is None
+        assert len(events) == 1
+        assert saved_financials is None
+        assert saved_history is None
+    finally:
         if email:
             await _cleanup_user(email)
         await engine.dispose()
