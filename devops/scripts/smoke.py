@@ -25,7 +25,6 @@ email = f'demo-{uuid4().hex}@example.com'
 password = uuid4().hex + '!Aa1'
 user = request('/api/v1/auth/register', {
     'email': email, 'password': password, 'full_name': 'Demo User',
-    'inn': str(uuid4().int)[:10],
 })
 login = request('/api/v1/auth/login', {'email': email, 'password': password})
 assert request('/api/v1/auth/me', token=login['access_token'])['id'] == user['user']['id']
