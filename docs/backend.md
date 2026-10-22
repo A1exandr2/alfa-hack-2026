@@ -215,7 +215,39 @@ curl -i http://127.0.0.1:8080/api/v1/auth/me
 4. Вставить сам JWT без префикса `Bearer` — Swagger добавит его автоматически.
 5. Выполнить `GET /api/v1/auth/me`.
 
-## 8. Автоматические тесты
+## 8. Черновики заявок
+
+Для создания заявки зарегистрируйтесь, привяжите компанию и получите UUID активного продукта через `GET /api/v1/credit-products`. Сумма и срок должны соответствовать диапазонам продукта.
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/applications \
+  -H 'Authorization: Bearer ***' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "product_id": "00000000-0000-0000-0000-000000000101",
+    "requested_amount": "100000.00",
+    "term_months": 6,
+    "purpose": "Пополнение оборотных средств"
+  }'
+```
+
+Создание возвращает `201` и статус `DRAFT`. Доступны `GET /api/v1/applications`, `GET /api/v1/applications/{application_id}` и частичный `PATCH` для редактирования только черновика. Список и карточка доступны только владельцу заявки; чужая заявка возвращает `404`. Изменять статус напрямую нельзя.
+
+Отправить черновик и посмотреть историю переходов:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/applications/{application_id}/submit \
+  -H 'Authorization: Bearer ***'
+
+curl http://127.0.0.1:8080/api/v1/applications/{application_id}/history \
+  -H 'Authorization: Bearer ***'
+```
+
+При успешной подготовке данных ответ содержит статус `SCORING`: это ожидание интеграции ML runtime, а не готовая оценка или решение. Snapshot и переходы submit фиксируются атомарно; сбой provider возвращает `502`, оставляя заявку в `DRAFT` без новых данных и переходов (сохраняется только событие создания черновика).
+
+Подробные схемы и коды ошибок: [API-контракт](api.md).
+
+## 9. Автоматические тесты
 
 Из папки `backend`:
 
@@ -232,12 +264,13 @@ PYTHONPATH=.. .venv/bin/python -m pytest -q
 - частичное обновление финансовых данных и валидация значений;
 - получение агрегированной кредитной истории через demo provider;
 - список и карточку demo-кредитного продукта;
+- черновики и submit заявок, snapshot, статусные события, идемпотентность, доступ и сбои providers;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;
 - health-check и конфигурацию.
 
-## 9. Остановка окружения
+## 10. Остановка окружения
 
 Остановить backend: `Ctrl+C` в терминале с Uvicorn.
 
@@ -263,9 +296,16 @@ PATCH /api/v1/company/financials
 GET  /api/v1/company/credit-history
 GET  /api/v1/credit-products
 GET  /api/v1/credit-products/{product_id}
+POST /api/v1/company/score
+POST /api/v1/applications
+GET  /api/v1/applications
+GET  /api/v1/applications/{application_id}
+PATCH /api/v1/applications/{application_id}
+POST /api/v1/applications/{application_id}/submit
+GET  /api/v1/applications/{application_id}/history
 ```
 
-Заявки и решения будут добавляться следующими вертикальными срезами.
+Application submit сохраняет snapshot и доводит заявку до `SCORING`, ожидая скоринговый результат. `POST /api/v1/company/score` уже доступен отдельно; он пока не связан с жизненным циклом заявки и не формирует финальное решение или предложение.
 
 ## Скоринг и Ollama в dev
 

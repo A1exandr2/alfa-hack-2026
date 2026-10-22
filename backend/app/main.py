@@ -10,6 +10,7 @@ from app.scoring.router import router as scoring_router
 from app.database import engine
 
 from app.auth.router import router as auth_router
+from app.applications.router import router as applications_router
 
 
 app = FastAPI(
@@ -21,6 +22,7 @@ app.include_router(auth_router)
 app.include_router(company_router)
 app.include_router(credit_products_router)
 app.include_router(scoring_router)
+app.include_router(applications_router)
 
 
 @app.get("/api/v1/health", tags=["system"])
