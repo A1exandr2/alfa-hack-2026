@@ -13,9 +13,10 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -197,4 +198,68 @@ class Application(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class ApplicationSnapshot(Base):
+    __tablename__ = "application_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "schema_version > 0", name="ck_application_snapshot_version_positive"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    application_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+
+class ApplicationEvent(Base):
+    __tablename__ = "application_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id", "sequence", name="uq_application_events_sequence"
+        ),
+        CheckConstraint(
+            "sequence > 0", name="ck_application_events_sequence_positive"
+        ),
+        CheckConstraint(
+            "actor_type IN ('USER', 'SYSTEM')", name="ck_application_events_actor_type"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    application_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    details: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, default=dict
     )

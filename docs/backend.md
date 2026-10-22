@@ -233,6 +233,18 @@ curl -X POST http://127.0.0.1:8080/api/v1/applications \
 
 Создание возвращает `201` и статус `DRAFT`. Доступны `GET /api/v1/applications`, `GET /api/v1/applications/{application_id}` и частичный `PATCH` для редактирования только черновика. Список и карточка доступны только владельцу заявки; чужая заявка возвращает `404`. Изменять статус напрямую нельзя.
 
+Отправить черновик и посмотреть историю переходов:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/applications/{application_id}/submit \
+  -H 'Authorization: Bearer ***'
+
+curl http://127.0.0.1:8080/api/v1/applications/{application_id}/history \
+  -H 'Authorization: Bearer ***'
+```
+
+При успешной подготовке данных ответ содержит статус `SCORING`: это ожидание интеграции ML runtime, а не готовая оценка или решение. Snapshot и переходы submit фиксируются атомарно; сбой provider возвращает `502`, оставляя заявку в `DRAFT` без новых данных и переходов (сохраняется только событие создания черновика).
+
 Подробные схемы и коды ошибок: [API-контракт](api.md).
 
 ## 9. Автоматические тесты
@@ -252,7 +264,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/applications \
 - частичное обновление финансовых данных и валидация значений;
 - получение агрегированной кредитной истории через demo provider;
 - список и карточку demo-кредитного продукта;
-- создание, просмотр, список и редактирование черновиков заявок; проверки диапазонов и доступа;
+- черновики и submit заявок, snapshot, статусные события, идемпотентность, доступ и сбои providers;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;
@@ -288,6 +300,8 @@ POST /api/v1/applications
 GET  /api/v1/applications
 GET  /api/v1/applications/{application_id}
 PATCH /api/v1/applications/{application_id}
+POST /api/v1/applications/{application_id}/submit
+GET  /api/v1/applications/{application_id}/history
 ```
 
-Обработка отправленных заявок, статусы, решения и предложения будут добавляться следующими вертикальными срезами.
+Вызов ML, решения и предложения будут добавляться следующими вертикальными срезами.

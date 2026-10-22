@@ -2,6 +2,8 @@ from sqlalchemy import CheckConstraint, inspect
 
 from app.models import (
     Application,
+    ApplicationEvent,
+    ApplicationSnapshot,
     Base,
     Company,
     CreditHistory,
@@ -16,6 +18,8 @@ def test_credit_domain_tables_are_registered() -> None:
 
     assert table_names == {
         "applications",
+        "application_events",
+        "application_snapshots",
         "companies",
         "credit_history",
         "credit_products",
@@ -81,6 +85,24 @@ def test_applications_have_database_level_amount_and_term_constraints() -> None:
 
     assert "requested_amount > 0" in constraints
     assert "term_months > 0" in constraints
+
+
+def test_snapshots_and_events_have_database_level_constraints() -> None:
+    snapshot_constraints = {
+        str(constraint.sqltext)
+        for constraint in ApplicationSnapshot.__table_args__
+        if isinstance(constraint, CheckConstraint)
+    }
+    event_constraints = {
+        str(constraint.sqltext)
+        for constraint in ApplicationEvent.__table_args__
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "schema_version > 0" in snapshot_constraints
+    assert "sequence > 0" in event_constraints
+    assert "actor_type IN ('USER', 'SYSTEM')" in event_constraints
+    assert ApplicationSnapshot.__table__.c.application_id.unique is True
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:

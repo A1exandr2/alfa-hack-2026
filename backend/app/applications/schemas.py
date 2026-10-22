@@ -68,3 +68,17 @@ class ApplicationUpdateRequest(BaseModel):
         if any(getattr(self, field) is None for field in self.model_fields_set):
             raise ValueError("Application fields cannot be null")
         return self
+
+
+class ApplicationEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    sequence: int
+    event_type: str
+    from_status: str | None
+    to_status: str | None
+    actor_type: str
+    actor_user_id: UUID | None
+    occurred_at: datetime
+    details: dict[str, object]

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +8,7 @@ from app.applications.schemas import (
     ApplicationCreateRequest,
     ApplicationUpdateRequest,
 )
-from app.models import Application, CreditProduct, User
+from app.models import Application, ApplicationEvent, CreditProduct, User
 
 
 class ApplicationError(Exception):
@@ -50,6 +50,27 @@ class ApplicationNotEditableError(ApplicationError):
         super().__init__("Only draft applications can be edited")
 
 
+class ApplicationSubmissionConflictError(ApplicationError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("Application cannot be submitted in its current state")
+
+
+class ApplicationDataProviderError(ApplicationError):
+    status_code = 502
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+
+
+class ApplicationDataMissingError(ApplicationError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("Application data is incomplete")
+
+
 async def _get_active_product(
     session: AsyncSession, product_id: UUID
 ) -> CreditProduct:
@@ -88,7 +109,9 @@ async def create_application(
     product = await _get_active_product(session, payload.product_id)
     _validate_terms(product, payload.requested_amount, payload.term_months)
 
+    application_id = uuid4()
     application = Application(
+        id=application_id,
         user_id=user.id,
         company_id=user.company_id,
         product_id=product.id,
@@ -97,6 +120,18 @@ async def create_application(
         purpose=payload.purpose,
     )
     session.add(application)
+    session.add(
+        ApplicationEvent(
+            application_id=application_id,
+            sequence=1,
+            event_type="APPLICATION_DRAFT_CREATED",
+            from_status=None,
+            to_status="DRAFT",
+            actor_type="USER",
+            actor_user_id=user.id,
+            details={},
+        )
+    )
     await session.commit()
     await session.refresh(application)
     return application

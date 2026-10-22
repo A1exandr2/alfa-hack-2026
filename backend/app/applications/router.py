@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.applications.schemas import (
     ApplicationCreateRequest,
+    ApplicationEventResponse,
     ApplicationResponse,
     ApplicationUpdateRequest,
 )
@@ -18,7 +19,16 @@ from app.applications.service import (
 )
 from app.auth.dependencies import get_current_user
 from app.database import get_db_session
+from app.integrations.credit_history import (
+    CreditHistoryProvider,
+    get_credit_history_provider,
+)
+from app.integrations.financials import (
+    FinancialProvider,
+    get_financial_provider,
+)
 from app.models import User
+from app.applications.workflow import list_application_events, submit_application
 
 
 router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
@@ -52,6 +62,45 @@ async def get_applications(
 ) -> list[ApplicationResponse]:
     applications = await list_applications(session, user.id)
     return [ApplicationResponse.model_validate(item) for item in applications]
+
+
+@router.post("/{application_id}/submit", response_model=ApplicationResponse)
+async def submit_application_for_scoring(
+    application_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    financial_provider: FinancialProvider = Depends(get_financial_provider),
+    credit_history_provider: CreditHistoryProvider = Depends(
+        get_credit_history_provider
+    ),
+) -> ApplicationResponse:
+    try:
+        application = await submit_application(
+            session,
+            user.id,
+            application_id,
+            financial_provider,
+            credit_history_provider,
+        )
+    except ApplicationError as error:
+        _raise_http_error(error)
+    return ApplicationResponse.model_validate(application)
+
+
+@router.get(
+    "/{application_id}/history",
+    response_model=list[ApplicationEventResponse],
+)
+async def get_application_history(
+    application_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[ApplicationEventResponse]:
+    try:
+        events = await list_application_events(session, user.id, application_id)
+    except ApplicationError as error:
+        _raise_http_error(error)
+    return [ApplicationEventResponse.model_validate(event) for event in events]
 
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
