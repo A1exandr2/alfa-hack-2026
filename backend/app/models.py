@@ -8,6 +8,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -158,3 +159,42 @@ class CreditProduct(Base):
     interest_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     data_source: Mapped[str] = mapped_column(String(32), nullable=False, default="DEMO")
+
+
+class Application(Base):
+    __tablename__ = "applications"
+    __table_args__ = (
+        CheckConstraint(
+            "requested_amount > 0", name="ck_applications_amount_positive"
+        ),
+        CheckConstraint("term_months > 0", name="ck_applications_term_positive"),
+        Index("ix_applications_user_created_at", "user_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    product_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("credit_products.id"), nullable=False
+    )
+    requested_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    term_months: Mapped[int] = mapped_column(Integer, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="DRAFT", server_default="DRAFT"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
