@@ -21,6 +21,7 @@ Nginx сохраняет пути `/api/v1`, `/docs`, `/openapi.json`, повт�
 | `make up` / `make up-gpu` | Общий стек, загрузка Qwen в volume (CPU / NVIDIA) |
 | `make up-core` | API/БД/Nginx без запуска Ollama; используется в CI |
 | `make check-ml` | Проверка реальной генерации Qwen через авторизованный API |
+| `make model-pull` | Скачать модель из OLLAMA_MODEL в уже запущенную Ollama |
 | `make down` | Удалить контейнеры и сети, сохранить данные |
 | `make build` | Собрать backend |
 | `make restart` | Перезапустить backend и Nginx без применения новых env/build |
@@ -32,7 +33,7 @@ Nginx сохраняет пути `/api/v1`, `/docs`, `/openapi.json`, повт�
 | `make shell` / `make db-shell` | Shell backend / psql |
 | `make gitleaks` | Проверка истории Git на секреты |
 
-Smoke создаёт одного уникального пользователя в рабочей локальной БД при каждом запуске. Пароли и JWT не печатаются. Тестовая БД хранится в tmpfs и удаляется после тестов; тесты не обращаются к рабочей базе.
+`make check` создаёт одного уникального пользователя в рабочей локальной БД при каждом запуске. `make check-ml` дополнительно создаёт новую demo-компанию и сохраняет её финансы и кредитную историю; выводит результат скоринга и LLM. Эти demo-записи остаются в локальной БД. Пароли и JWT не печатаются. Тестовая БД хранится в tmpfs и удаляется после тестов; тесты не обращаются к рабочей базе.
 
 `make status` показывает размер writable layers, который не включает volumes. `docker system df` в конце — суммарная статистика Docker на компьютере, включая образы, volumes и build cache других проектов. Команды очистки автоматически не выполняются.
 
@@ -49,7 +50,7 @@ Smoke создаёт одного уникального пользовател�
 
 Если порт занят старым контейнером или локальным сервером, измените порт в `.env`. Старые контейнеры и данные автоматически не удаляются. При ошибке миграций смотрите `make logs SERVICE=migrate`, исправьте причину и повторите `make up`.
 
-SOPS + age отложены по договорённости. GraalVM относится к другим runtime; для текущего Python/FastAPI приложения его сборка не требуется. Прямые Python-зависимости закреплены в `backend/requirements.txt`, транзитивные — в `backend/requirements.lock` (Python 3.12/Linux). Docker использует lock как constraints; обновляйте оба файла вместе и прогоняйте `make test`. Теги базовых образов закреплены по версиям, но не по digest.
+SOPS + age отложены по договорённости. GraalVM относится к другим runtime; для текущего Python/FastAPI приложения его сборка не требуется. Прямые Python-зависимости закреплены в `backend/requirements.txt`, транзитивные — в `backend/requirements.lock` (Python 3.12/Linux). Docker использует lock как constraints; обновляйте оба файла вместе и прогоняйте `make test`. Python, PostgreSQL и Nginx закреплены по версиям; Ollama закреплена по digest.
 
 ## CI
 
@@ -91,8 +92,22 @@ Runner для Docker-задач должен иметь доступ к Docker: 
 
 Документация: https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners
 
-Runner зарегистрирован владельцем, работает как systemd-служба и отображается в GitHub со статусом Idle. Фактический прогон GitHub Actions проверяется после push.
+### Фактическая проверка dev 22.10.2026
+
+Ветка `dev`, коммит `526fd1d`: [CI завершился успешно](https://github.com/A1exandr2/credit/actions/runs/39756573407). Прошли Docker integration tests (27 pytest-тестов и HTTP smoke), Semgrep, Gitleaks и Trivy dependencies. Maven, Python lint и Checkov пропущены по условиям workflow; зависимая сборка/сканирование образа также не выполнялась. Это не результаты дополнительных отключённых проверок.
+
+На момент этого прогона systemd-служба `actions.runner.A1exandr2-credit.credit-local.service` была установлена, но остановлена. Runner запущен командой `./run.sh` в управляемой сессии; успешный CI не доказывает настроенный автозапуск службы. Чтобы перейти на службу, сначала остановите запущенный `run.sh`, затем из `~/actions-runner-credit` выполните `sudo ./svc.sh start` и `sudo ./svc.sh status`. Повторный install не нужен, если служба уже установлена.
+
+Статусы в Settings → Actions → Runners: Idle — подключён и свободен; Active — выполняет job; Offline — нет соединения. Если jobs стоят в очереди, проверьте статус и все labels: `self-hosted`, `Linux`, `X64`, `credit`.
 
 ## ML runtime
 
 Подключение Qwen, контракт скоринга, формулы признаков и ограничения: [ml.md](ml.md). Ollama находится в internal и model-download (скачивание весов) сетях; порт 11434 на хост не публикуется. Том ollama_data сохраняется при make down.
+
+## Диагностика общего стека
+
+- `make check-ml` завершился с `Fallback_Rules`: проверьте `make logs SERVICE=backend`, `make logs SERVICE=ollama` и `docker compose --env-file .env exec -T ollama ollama list`; модель должна совпадать с OLLAMA_MODEL. При отсутствии весов выполните `make model-pull`.
+- Первый запрос может ждать загрузку и прогрев; измеренный холодный запуск на RTX 2060 SUPER занял около минуты, последующие — около 3 секунд. Это наблюдение для конкретного ПК, не гарантия для CPU или другой модели.
+- Для проверки GPU: `docker compose --env-file .env exec -T ollama ollama ps`; во время загруженной модели поле PROCESSOR должно показывать использование GPU.
+- `make restart` перезапускает только Backend/Nginx. Для применения новых настроек, сборки или выбора CPU/GPU используйте соответствующую команду `make up` / `make up-gpu`.
+- Healthy у Backend подтверждает доступ к БД, у Ollama — доступность runtime, но не готовность конкретных весов или корректность рекомендаций. Реальную генерацию проверяет `make check-ml`.

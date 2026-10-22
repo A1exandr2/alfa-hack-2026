@@ -1,6 +1,6 @@
 # Backend
 
-Рекомендуемый запуск всего готового стека из корня: `make up`, затем `make check`. Swagger: http://localhost:8080/docs. Docker применяет миграции автоматически. Подробности: [DevOps](devops.md).
+Рекомендуемый запуск всего готового стека из корня: `make up-gpu` для NVIDIA или `make up` для CPU, затем `make check` и `make check-ml`. Только API/БД/Nginx: `make up-core`. Swagger: http://localhost:8080/docs. Docker применяет миграции автоматически. Подробности: [DevOps](devops.md).
 
 Ниже — альтернативный запуск Python на хосте. Не запускайте его одновременно с Docker-стеком на тех же портах.
 
@@ -81,7 +81,7 @@ cd backend
 Из папки `backend`:
 
 ```bash
-.venv/bin/uvicorn app.main:app \
+PYTHONPATH=.. .venv/bin/uvicorn app.main:app \
   --host 127.0.0.1 \
   --port 8080 \
   --reload
@@ -220,7 +220,7 @@ curl -i http://127.0.0.1:8080/api/v1/auth/me
 Из папки `backend`:
 
 ```bash
-.venv/bin/python -m pytest -q
+PYTHONPATH=.. .venv/bin/python -m pytest -q
 ```
 
 Тесты используют локальную PostgreSQL и проверяют:
@@ -266,3 +266,11 @@ GET  /api/v1/credit-products/{product_id}
 ```
 
 Заявки и решения будут добавляться следующими вертикальными срезами.
+
+## Скоринг и Ollama в dev
+
+Backend импортирует `ml.facade.score_and_explain` из корня репозитория. Поэтому при запуске Python из `backend/` требуется `PYTHONPATH=..` (в том числе для pytest). В общем Docker-образе оба модуля находятся в `/app`, дополнительный PYTHONPATH не требуется.
+
+Для запуска Backend на хосте Ollama должна быть доступна по `OLLAMA_HOST` (по умолчанию `http://localhost:11434`) и содержать модель `OLLAMA_MODEL` (по умолчанию `qwen3.5:4b`). Compose не публикует Ollama на хост; его внутренний адрес `http://ollama:11434` работает только в Docker-сети. Без доступной Ollama API сохраняет скоринг по правилам и возвращает `Fallback_Rules`. Для проверки полной связки используйте общий Docker-запуск, описанный выше.
+
+Endpoint `POST /api/v1/company/score` требует JWT и связанную компанию. Источники данных, преобразование признаков, пример ответа, ошибки и проверка через Swagger: [ML](ml.md), [API](api.md).
