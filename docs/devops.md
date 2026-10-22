@@ -4,7 +4,7 @@
 
 Требуются Docker Engine, Compose v2+ с поддержкой `--wait`, GNU Make и Python 3. Из корня выполните `make up`. При первом запуске скачиваются образы и Python-зависимости.
 
-Стек: Nginx → FastAPI → PostgreSQL. Одноразовый сервис `migrate` выполняет `alembic upgrade head` после готовности PostgreSQL; backend запускается только после успешных миграций, Nginx — после готовности backend. Frontend пока отсутствует, корень сайта перенаправляет в Swagger.
+Стек: Nginx → FastAPI (с ML-фасадом) → PostgreSQL и Ollama/Qwen. `make up-gpu` включает NVIDIA; `make up` использует CPU; `make up-core` запускает API без Ollama. Одноразовый сервис `migrate` выполняет `alembic upgrade head` после готовности PostgreSQL; backend запускается только после успешных миграций, Nginx — после готовности backend. Frontend пока отсутствует, корень сайта перенаправляет в Swagger.
 
 Backend собирается в несколько стадий: сборка wheels → установка в runtime → отдельная тестовая стадия → production. В runtime нет компилятора, исходники тестов находятся только в тестовом образе. Процесс работает под UID 10001, с read-only filesystem, временным `/tmp`, без Linux capabilities и с лимитом RAM 512 MiB. Docker init пересылает сигналы и убирает дочерние процессы.
 
@@ -18,7 +18,9 @@ Nginx сохраняет пути `/api/v1`, `/docs`, `/openapi.json`, повт�
 | --- | --- |
 | `make init` | Создать `.env` с правами 0600 и случайным JWT-ключом, если файла ещё нет |
 | `make config` | Проверить Compose без вывода секретов |
-| `make up` | Собрать и запустить стек, дождаться готовности |
+| `make up` / `make up-gpu` | Общий стек, загрузка Qwen в volume (CPU / NVIDIA) |
+| `make up-core` | API/БД/Nginx без запуска Ollama; используется в CI |
+| `make check-ml` | Проверка реальной генерации Qwen через авторизованный API |
 | `make down` | Удалить контейнеры и сети, сохранить данные |
 | `make build` | Собрать backend |
 | `make restart` | Перезапустить backend и Nginx без применения новых env/build |
@@ -90,3 +92,7 @@ Runner для Docker-задач должен иметь доступ к Docker: 
 Документация: https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners
 
 Runner зарегистрирован владельцем, работает как systemd-служба и отображается в GitHub со статусом Idle. Фактический прогон GitHub Actions проверяется после push.
+
+## ML runtime
+
+Подключение Qwen, контракт скоринга, формулы признаков и ограничения: [ml.md](ml.md). Ollama находится в internal и model-download (скачивание весов) сетях; порт 11434 на хост не публикуется. Том ollama_data сохраняется при make down.

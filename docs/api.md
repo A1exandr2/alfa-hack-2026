@@ -171,7 +171,7 @@ Authorization: Bearer <access_token>
   "name": "Демо-компания 7700000000",
   "inn": "7700000000",
   "ogrn": null,
-  "registration_date": null,
+  "registration_date": "2019-01-01",
   "status": "ACTIVE",
   "director_name": null,
   "okved": null,
@@ -299,3 +299,7 @@ GET /api/v1/credit-products/{product_id}
 ## Текущий статус реализации
 
 Реализованы health-check, регистрация пользователя без компании, login, получение текущего пользователя по JWT, привязка и просмотр компании через `CompanyProvider`, GET/PATCH финансов через `FinancialProvider`, просмотр кредитной истории через `CreditHistoryProvider` и список/карточка demo-кредитного продукта. Финансовые показатели после редактирования маркируются `USER_VERIFIED`. Следующий срез — заявки.
+
+## Скоринг и LLM-рекомендация (dev)
+
+`POST /api/v1/company/score` с JWT: `{ "loan_amount": 1000000, "user_query": "Нужен кредит на оборудование" }`. Компания берётся из аккаунта, финансовые признаки рассчитываются на сервере. Полный контракт, формулы, источники AI/Fallback_Rules и ограничения: [ml.md](ml.md).

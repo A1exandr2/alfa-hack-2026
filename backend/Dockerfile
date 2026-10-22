@@ -12,6 +12,7 @@ RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home a
 COPY --from=dependencies /wheels /wheels
 COPY backend/requirements.txt backend/requirements.lock ./
 RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt -c requirements.lock && rm -rf /wheels
+COPY --chown=10001:10001 ml ./ml
 COPY --chown=10001:10001 backend/app ./app
 COPY --chown=10001:10001 backend/migrations ./migrations
 COPY --chown=10001:10001 backend/alembic.ini ./alembic.ini

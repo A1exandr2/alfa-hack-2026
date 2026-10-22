@@ -28,6 +28,8 @@ class DemoCompanyProvider:
         return CompanyData(
             name=f"Демо-компания {inn}",
             inn=inn,
+            # Explicit synthetic fixture, not a fetched registry date.
+            registration_date=date(2019, 1, 1),
             data_source="DEMO",
         )
 

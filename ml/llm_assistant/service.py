@@ -1,11 +1,15 @@
-import ollama 
+import logging
+import os
+
+import ollama
 
 from ml.llm_assistant.fallback import rule_based_fallback
 from ml.llm_assistant.preprocessor import enrich_data_for_llm
 from ml.llm_assistant.prompts import SYSTEM_PROMPT
 from ml.llm_assistant.schemas import CreditAdvice
 
-MODEL = "qwen3.5:4b"
+MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+logger = logging.getLogger(__name__)
 
 
 def get_ai_advice(
@@ -22,7 +26,11 @@ def get_ai_advice(
             f"Запрос клиента: {enriched['safe_query']}"
         )
 
-        response = ollama.chat(
+        client = ollama.Client(
+            host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            timeout=float(os.getenv("OLLAMA_TIMEOUT", "120")),
+        )
+        response = client.chat(
             model=MODEL, 
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT}, 
@@ -30,13 +38,13 @@ def get_ai_advice(
             ],
             format=CreditAdvice.model_json_schema(), 
             think=False, # Отключаем reasoning-режим
-            options={"temperature": 0.1, "num_predict": 300},
+            options={"temperature": 0.1, "num_predict": 300, "num_ctx": 4096},
         )
         ai_response = CreditAdvice.model_validate_json(
             response["message"]["content"]
         )
         return {"source": "AI", "data": ai_response.model_dump()}
     except Exception as e:
-        print(f"[llm_assistant] AI error: {e}. Falling back to rules.")
+        logger.warning("Ollama unavailable or invalid response (%s); using rules", type(e).__name__)
         fb = rule_based_fallback(raw_data)
         return {"source": "Fallback_Rules", "data": fb.model_dump()}

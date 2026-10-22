@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.company.router import router as company_router
 from app.credit_products.router import router as credit_products_router
+from app.scoring.router import router as scoring_router
 from app.database import engine
 
 from app.auth.router import router as auth_router
@@ -19,6 +20,7 @@ app = FastAPI(
 app.include_router(auth_router)
 app.include_router(company_router)
 app.include_router(credit_products_router)
+app.include_router(scoring_router)
 
 
 @app.get("/api/v1/health", tags=["system"])

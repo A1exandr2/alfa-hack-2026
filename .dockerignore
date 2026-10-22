@@ -16,3 +16,6 @@
 devops/runner
 .ci-images
 ml/artifacts
+
+# Generated synthetic datasets are not application runtime files.
+data/*.csv
