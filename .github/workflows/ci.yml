@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -13,7 +13,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Сейчас включен security. Build/lint/docker включим после появления кода.
+# Security, Python syntax and ML dependency checks run automatically.
 # Все jobs выполняются на credit-local. PR из чужих fork не запускаются на локальном ПК.
 jobs:
   gitleaks:
@@ -67,20 +67,36 @@ jobs:
             --skip-dirs devops/runner --no-progress \
             --severity HIGH,CRITICAL --exit-code 1 .
 
-  # Заготовки: включать только после добавления соответствующего кода.
-  compile-check:
-    name: Build / Maven
-    if: vars.ENABLE_JAVA_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+  python-syntax:
+    name: Python / Syntax
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, credit]
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Compile and test backend
+      - name: Compile Python sources
         run: |
-          docker run --rm -v "$PWD:/app" -w /app/backend \
-            maven:3.9-eclipse-temurin-21 mvn -B clean verify
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            -e PYTHONPYCACHEPREFIX=/tmp/pycache \
+            python:3.12.12-slim-bookworm \
+            python -m compileall -q ml data
+
+  ml-dependencies:
+    name: ML / Dependencies
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install and check ML dependencies
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src \
+            python:3.12.12-slim-bookworm \
+            sh -ec 'pip install --no-cache-dir -r ml/requirements.txt; python -m pip check'
 
   python-lint:
     name: Lint / Python
