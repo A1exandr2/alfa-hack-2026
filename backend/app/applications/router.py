@@ -8,6 +8,9 @@ from app.applications.schemas import (
     ApplicationCreateRequest,
     ApplicationDecisionResponse,
     ApplicationEventResponse,
+    ApplicationReviewRequest,
+    ApplicationReviewRecordResponse,
+    ApplicationReviewResponse,
     ApplicationResponse,
     ApplicationSubmissionResponse,
     ApplicationUpdateRequest,
@@ -24,7 +27,8 @@ from app.applications.workflow import (
     list_application_events,
     submit_application,
 )
-from app.auth.dependencies import get_current_user
+from app.applications.review import review_application as record_application_review
+from app.auth.dependencies import get_current_reviewer, get_current_user
 from app.database import get_db_session
 from app.integrations.credit_history import (
     CreditHistoryProvider,
@@ -100,6 +104,30 @@ async def submit_application_for_scoring(
             else None
         ),
         required_fields=required_fields,
+    )
+
+
+@router.post(
+    "/{application_id}/review",
+    response_model=ApplicationReviewResponse,
+)
+async def review_application_decision(
+    application_id: UUID,
+    payload: ApplicationReviewRequest,
+    user: User = Depends(get_current_reviewer),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApplicationReviewResponse:
+    try:
+        application, decision, review = await record_application_review(
+            session, user.id, application_id, payload
+        )
+    except ApplicationError as error:
+        _raise_http_error(error)
+    return ApplicationReviewResponse(
+        application_id=application.id,
+        status=application.status,
+        review=ApplicationReviewRecordResponse.model_validate(review),
+        original_decision=ApplicationDecisionResponse.model_validate(decision),
     )
 
 

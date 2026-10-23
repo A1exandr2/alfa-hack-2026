@@ -840,3 +840,165 @@ async def test_missing_official_registration_date_stays_draft(monkeypatch) -> No
         if email:
             await _cleanup_user(email)
         await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("review_outcome", "expected_status", "other_outcome"),
+    [
+        ("APPROVED", "DECISION", "REJECTED"),
+        ("REJECTED", "REJECTED", "APPROVED"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_reviewer_resolves_conditional_application(
+    monkeypatch, review_outcome: str, expected_status: str, other_outcome: str
+) -> None:
+    applicant_email = reviewer_email = ""
+
+    def conditional_score(**kwargs: Any) -> dict[str, Any]:
+        advice = CreditAdvice(
+            decision="CONDITIONAL_APPROVAL",
+            conditions=["Требуется ручная проверка финансовых данных."],
+            recommended_product="Оборотный",
+            explanation="Требуется дополнительная проверка.",
+            top_risk_factors=["Необходима проверка документов"],
+            next_step="Дождитесь решения проверяющего.",
+        )
+        return {
+            "decision": "CONDITIONAL_APPROVAL",
+            "risk_score": 55.0,
+            "risk_level": "Medium",
+            "top_factors": ["Необходима проверка документов"],
+            "ai_advice": {
+                "source": "Fallback_Rules",
+                "data": advice.model_dump(mode="json"),
+            },
+        }
+
+    monkeypatch.setattr(application_workflow, "score_and_explain", conditional_score)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            applicant_email, applicant_headers = await _register_company_user(client)
+            reviewer_email = f"reviewer-{uuid4()}@example.com"
+            reviewer_register = await client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": reviewer_email,
+                    "password": "StrongPass123!",
+                    "full_name": "Reviewer User",
+                },
+            )
+            assert reviewer_register.status_code == 201
+            reviewer_headers = {
+                "Authorization": f"Bearer {reviewer_register.json()['access_token']}"
+            }
+            async with session_factory() as session:
+                reviewer = await session.scalar(
+                    select(User).where(User.email == reviewer_email)
+                )
+                assert reviewer is not None
+                reviewer.role = "REVIEWER"
+                reviewer_id = str(reviewer.id)
+                await session.commit()
+
+            products = await client.get("/api/v1/credit-products")
+            created = await _create_draft(
+                client, applicant_headers, products.json()[0]
+            )
+            application_id = created.json()["id"]
+            draft_review = await client.post(
+                f"/api/v1/applications/{application_id}/review",
+                headers=reviewer_headers,
+                json={"outcome": review_outcome},
+            )
+            user_review = await client.post(
+                f"/api/v1/applications/{application_id}/review",
+                headers=applicant_headers,
+                json={"outcome": review_outcome},
+            )
+            submission = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=applicant_headers,
+            )
+            comment = "Проверены документы компании."
+            review_payload = {"outcome": review_outcome, "comment": comment}
+            reviewed = await client.post(
+                f"/api/v1/applications/{application_id}/review",
+                headers=reviewer_headers,
+                json=review_payload,
+            )
+            replayed = await client.post(
+                f"/api/v1/applications/{application_id}/review",
+                headers=reviewer_headers,
+                json=review_payload,
+            )
+            conflicting = await client.post(
+                f"/api/v1/applications/{application_id}/review",
+                headers=reviewer_headers,
+                json={"outcome": other_outcome, "comment": comment},
+            )
+            decision_response = await client.get(
+                f"/api/v1/applications/{application_id}/decision",
+                headers=applicant_headers,
+            )
+            history = await client.get(
+                f"/api/v1/applications/{application_id}/history",
+                headers=applicant_headers,
+            )
+
+        assert draft_review.status_code == 409
+        assert user_review.status_code == 403
+        assert submission.status_code == 200
+        assert submission.json()["status"] == "MANUAL_REVIEW"
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == expected_status
+        assert reviewed.json()["review"]["outcome"] == review_outcome
+        assert reviewed.json()["review"]["reviewer_user_id"] == reviewer_id
+        assert reviewed.json()["review"]["comment"] == comment
+        assert reviewed.json()["original_decision"]["outcome"] == (
+            "CONDITIONAL_APPROVAL"
+        )
+        assert replayed.status_code == 200
+        assert replayed.json() == reviewed.json()
+        assert conflicting.status_code == 409
+        assert decision_response.status_code == 200
+        assert decision_response.json()["outcome"] == "CONDITIONAL_APPROVAL"
+        assert history.status_code == 200
+        final_event = history.json()[-1]
+        assert final_event["event_type"] == "APPLICATION_REVIEW_RECORDED"
+        assert final_event["actor_user_id"] == reviewer_id
+        assert final_event["from_status"] == "MANUAL_REVIEW"
+        assert final_event["to_status"] == expected_status
+        assert final_event["details"]["ai_outcome"] == "CONDITIONAL_APPROVAL"
+
+        async with session_factory() as session:
+            saved_application = await session.get(Application, application_id)
+            saved_decision = await session.scalar(
+                select(ApplicationDecision).where(
+                    ApplicationDecision.application_id == application_id
+                )
+            )
+            review_rows = await session.execute(
+                text(
+                    "SELECT outcome, reviewer_user_id, comment "
+                    "FROM application_reviews WHERE application_id = :application_id"
+                ),
+                {"application_id": application_id},
+            )
+        review_row = review_rows.first()
+        assert saved_application is not None
+        assert saved_application.status == expected_status
+        assert saved_decision is not None
+        assert saved_decision.outcome == "CONDITIONAL_APPROVAL"
+        assert review_row is not None
+        assert review_row.outcome == review_outcome
+        assert str(review_row.reviewer_user_id) == reviewer_id
+        assert review_row.comment == comment
+    finally:
+        if applicant_email:
+            await _cleanup_user(applicant_email)
+        if reviewer_email:
+            await _cleanup_user(reviewer_email)
+        await engine.dispose()

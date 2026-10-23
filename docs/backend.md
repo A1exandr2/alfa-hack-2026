@@ -248,6 +248,8 @@ curl http://127.0.0.1:8080/api/v1/applications/{application_id}/history \
 
 При корректных данных Backend вызывает `ml.facade.score_and_explain` вне async event loop, передавая snapshot, продукт и срок. Неизменяемый snapshot схемы версии 4, запись `ApplicationDecision` и audit events сохраняются атомарно. `APPROVED` переводит заявку в `DECISION`, `CONDITIONAL_APPROVAL` — в `MANUAL_REVIEW`, `REJECTED` — в `REJECTED`. При недоступной Ollama фасад возвращает тот же контракт из `Fallback_Rules`; исключение фасада или невалидный ответ возвращает `502` без смены текущего статуса и без фиксации новой попытки.
 
+Спорную заявку `MANUAL_REVIEW` завершает `POST /api/v1/applications/{application_id}/review`. Endpoint требует роль `REVIEWER`; исход человека (`APPROVED`/`REJECTED`) сохраняется в `ApplicationReview` отдельно от неизменяемой рекомендации модели в `ApplicationDecision`. Решение создаёт audit event и переводит заявку в `DECISION` или `REJECTED`. Новые пользователи получают `USER`; публичного API для повышения роли нет, reviewer назначается доверенным оператором.
+
 Подробные схемы и коды ошибок: [API-контракт](api.md).
 
 ## 9. Автоматические тесты
@@ -268,6 +270,7 @@ PYTHONPATH=.. .venv/bin/python -m pytest -q
 - получение агрегированной кредитной истории через demo provider;
 - список и карточку demo-кредитного продукта;
 - черновики и submit заявок, `NEED_MORE_DATA`, исправление финансов и повторный submit с новой версией snapshot, статусные события, идемпотентность, доступ и сбои providers;
+- approve/reject только для `REVIEWER` на заявках `MANUAL_REVIEW`, сохранение исхода модели и аудит решения;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;

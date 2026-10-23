@@ -57,6 +57,13 @@ class ApplicationSubmissionConflictError(ApplicationError):
         super().__init__("Application cannot be submitted in its current state")
 
 
+class ApplicationReviewConflictError(ApplicationError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("Application is not awaiting a reviewer decision")
+
+
 class ApplicationDataProviderError(ApplicationError):
     status_code = 502
 

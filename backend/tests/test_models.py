@@ -4,6 +4,7 @@ from app.models import (
     Application,
     ApplicationDecision,
     ApplicationEvent,
+    ApplicationReview,
     ApplicationSnapshot,
     Base,
     Company,
@@ -21,6 +22,7 @@ def test_credit_domain_tables_are_registered() -> None:
         "applications",
         "application_decisions",
         "application_events",
+        "application_reviews",
         "application_snapshots",
         "companies",
         "credit_history",
@@ -133,6 +135,23 @@ def test_application_decisions_have_database_level_domain_constraints() -> None:
     }
     assert ("application_id",) in unique_column_sets
     assert ("snapshot_id",) in unique_column_sets
+
+
+def test_application_reviews_have_separate_outcomes_and_unique_records() -> None:
+    constraints = {
+        str(constraint.sqltext)
+        for constraint in ApplicationReview.__table_args__
+        if isinstance(constraint, CheckConstraint)
+    }
+    unique_column_sets = {
+        tuple(constraint.columns.keys())
+        for constraint in ApplicationReview.__table_args__
+        if isinstance(constraint, UniqueConstraint)
+    }
+
+    assert "outcome IN ('APPROVED', 'REJECTED')" in constraints
+    assert ("application_id",) in unique_column_sets
+    assert ("decision_id",) in unique_column_sets
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:

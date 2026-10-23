@@ -142,6 +142,38 @@ class ApplicationDecisionResponse(BaseModel):
     created_at: datetime
 
 
+class ApplicationReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["APPROVED", "REJECTED"]
+    comment: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("comment")
+    @classmethod
+    def normalize_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class ApplicationReviewRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    outcome: Literal["APPROVED", "REJECTED"]
+    reviewer_user_id: UUID
+    comment: str | None
+    created_at: datetime
+
+
+class ApplicationReviewResponse(BaseModel):
+    application_id: UUID
+    status: Literal["DECISION", "REJECTED"]
+    review: ApplicationReviewRecordResponse
+    original_decision: ApplicationDecisionResponse
+
+
 class ApplicationSubmissionResponse(ApplicationResponse):
     decision: ApplicationDecisionResponse | None = None
     required_fields: list[str] = Field(default_factory=list)

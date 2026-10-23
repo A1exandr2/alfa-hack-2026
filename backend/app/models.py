@@ -295,6 +295,42 @@ class ApplicationDecision(Base):
     )
 
 
+class ApplicationReview(Base):
+    __tablename__ = "application_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('APPROVED', 'REJECTED')",
+            name="ck_application_reviews_outcome",
+        ),
+        UniqueConstraint(
+            "application_id", name="uq_application_reviews_application_id"
+        ),
+        UniqueConstraint("decision_id", name="uq_application_reviews_decision_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    application_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    decision_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("application_decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reviewer_user_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ApplicationEvent(Base):
     __tablename__ = "application_events"
     __table_args__ = (
