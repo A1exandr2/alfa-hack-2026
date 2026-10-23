@@ -83,7 +83,7 @@ async def submit_application_for_scoring(
     ),
 ) -> ApplicationSubmissionResponse:
     try:
-        application, decision = await submit_application(
+        application, decision, required_fields = await submit_application(
             session,
             user.id,
             application_id,
@@ -99,6 +99,7 @@ async def submit_application_for_scoring(
             if decision is not None
             else None
         ),
+        required_fields=required_fields,
     )
 
 

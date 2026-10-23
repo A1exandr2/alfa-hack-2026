@@ -243,7 +243,9 @@ curl http://127.0.0.1:8080/api/v1/applications/{application_id}/history \
   -H 'Authorization: Bearer ***'
 ```
 
-При успешной подготовке данных Backend вызывает `ml.facade.score_and_explain` вне async event loop, передавая snapshot, продукт и срок. Неизменяемый snapshot версии 3, запись `ApplicationDecision` и audit events сохраняются атомарно. `APPROVED` переводит заявку в `DECISION`, `CONDITIONAL_APPROVAL` — в `MANUAL_REVIEW`, `REJECTED` — в `REJECTED`. При недоступной Ollama фасад возвращает тот же контракт из `Fallback_Rules`; исключение фасада или невалидный ответ возвращает `502` и оставляет заявку в `DRAFT`.
+При `financials.revenue_annual == 0` Backend возвращает `NEED_MORE_DATA` и `required_fields`, не вызывая модель. Исправьте выручку через `PATCH /api/v1/company/financials` и повторите submit: появится новая версия snapshot. Повтор без исправления данных не создаёт дубликат. Официальную дату регистрации пользователь менять не может; при её отсутствии submit возвращает `409` без смены статуса.
+
+При корректных данных Backend вызывает `ml.facade.score_and_explain` вне async event loop, передавая snapshot, продукт и срок. Неизменяемый snapshot схемы версии 4, запись `ApplicationDecision` и audit events сохраняются атомарно. `APPROVED` переводит заявку в `DECISION`, `CONDITIONAL_APPROVAL` — в `MANUAL_REVIEW`, `REJECTED` — в `REJECTED`. При недоступной Ollama фасад возвращает тот же контракт из `Fallback_Rules`; исключение фасада или невалидный ответ возвращает `502` без смены текущего статуса и без фиксации новой попытки.
 
 Подробные схемы и коды ошибок: [API-контракт](api.md).
 
@@ -264,11 +266,21 @@ PYTHONPATH=.. .venv/bin/python -m pytest -q
 - частичное обновление финансовых данных и валидация значений;
 - получение агрегированной кредитной истории через demo provider;
 - список и карточку demo-кредитного продукта;
-- черновики и submit заявок, snapshot, статусные события, идемпотентность, доступ и сбои providers;
+- черновики и submit заявок, `NEED_MORE_DATA`, исправление финансов и повторный submit с новой версией snapshot, статусные события, идемпотентность, доступ и сбои providers;
 - login;
 - JWT и `/auth/me`;
 - модели и миграции;
 - health-check и конфигурацию.
+
+Для отдельной проверки полного submit через живую Qwen нужен запущенный `make up` (первый запуск скачивает модель):
+
+```bash
+docker compose --env-file .env --profile test run --rm \
+  -e RUN_LIVE_QWEN_APPLICATION=1 test sh -ec \
+  'alembic upgrade head && python -m pytest -q tests/test_application_live_ml.py'
+```
+
+Этот live-тест пропускается в обычном `make test`; он требует доступной Ollama и проверяет `source=AI`, исход/conditions/factors, а также сохранённые snapshot с продуктом и сроком.
 
 ## 10. Остановка окружения
 

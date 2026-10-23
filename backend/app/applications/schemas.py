@@ -144,3 +144,4 @@ class ApplicationDecisionResponse(BaseModel):
 
 class ApplicationSubmissionResponse(ApplicationResponse):
     decision: ApplicationDecisionResponse | None = None
+    required_fields: list[str] = Field(default_factory=list)

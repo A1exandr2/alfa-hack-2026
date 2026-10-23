@@ -54,7 +54,9 @@ def _build_scoring_input(
     registration_date = company.registration_date
     today = date.today()
     revenue = float(financials.revenue_annual)
-    if registration_date is None or registration_date > today or revenue <= 0:
+    if registration_date is None or registration_date > today:
+        raise ApplicationDataMissingError()
+    if revenue <= 0:
         raise ApplicationDataMissingError()
 
     company_features = {
@@ -184,7 +186,8 @@ def _build_snapshot_payload(
     product: CreditProduct,
     financials: Financials,
     credit_history: CreditHistory,
-    risk_assessment: ApplicationRiskAssessment,
+    risk_assessment: ApplicationRiskAssessment | None,
+    required_fields: list[str],
 ) -> dict[str, object]:
     return {
         "application": {
@@ -235,8 +238,50 @@ def _build_snapshot_payload(
             "interest_rate": str(product.interest_rate),
             "data_source": product.data_source,
         },
-        "risk_assessment": risk_assessment.model_dump(mode="json"),
+        "risk_assessment": (
+            risk_assessment.model_dump(mode="json")
+            if risk_assessment is not None
+            else None
+        ),
+        "required_fields": required_fields,
     }
+
+
+def _apply_status_transitions(
+    application: Application,
+    user_id: UUID,
+    transitions: tuple[tuple[str, str, str, str], ...],
+    first_sequence: int,
+    snapshot_id: UUID,
+    snapshot_version: int,
+    extra_details: dict[str, dict[str, object]] | None = None,
+) -> list[ApplicationEvent]:
+    events = []
+    extra_details = extra_details or {}
+    for sequence, (from_status, to_status, event_type, actor_type) in enumerate(
+        transitions, start=first_sequence
+    ):
+        if application.status != from_status:
+            raise ApplicationSubmissionConflictError()
+        application.status = to_status
+        details: dict[str, object] = {
+            "snapshot_id": str(snapshot_id),
+            "snapshot_version": snapshot_version,
+            **extra_details.get(event_type, {}),
+        }
+        events.append(
+            ApplicationEvent(
+                application_id=application.id,
+                sequence=sequence,
+                event_type=event_type,
+                from_status=from_status,
+                to_status=to_status,
+                actor_type=actor_type,
+                actor_user_id=user_id if actor_type == "USER" else None,
+                details=details,
+            )
+        )
+    return events
 
 
 async def submit_application(
@@ -245,7 +290,7 @@ async def submit_application(
     application_id: UUID,
     financial_provider: FinancialProvider,
     credit_history_provider: CreditHistoryProvider,
-) -> tuple[Application, ApplicationDecision | None]:
+) -> tuple[Application, ApplicationDecision | None, list[str]]:
     application = await session.scalar(
         select(Application)
         .where(
@@ -257,24 +302,23 @@ async def submit_application(
     if application is None:
         raise ApplicationNotFoundError()
 
-    if application.status != "DRAFT":
-        snapshot = await session.scalar(
-            select(ApplicationSnapshot).where(
-                ApplicationSnapshot.application_id == application.id
+    if application.status in {"DECISION", "MANUAL_REVIEW", "REJECTED"}:
+        decision = await session.scalar(
+            select(ApplicationDecision).where(
+                ApplicationDecision.application_id == application.id
             )
         )
-        if snapshot is not None:
-            decision = await session.scalar(
-                select(ApplicationDecision).where(
-                    ApplicationDecision.application_id == application.id
-                )
-            )
-            return application, decision
+        if decision is not None:
+            return application, decision, []
+        raise ApplicationSubmissionConflictError()
+    if application.status not in {"DRAFT", "NEED_MORE_DATA"}:
         raise ApplicationSubmissionConflictError()
 
     company = await session.get(Company, application.company_id)
     product = await session.get(CreditProduct, application.product_id)
     if company is None or product is None or not product.is_active:
+        raise ApplicationDataMissingError()
+    if company.registration_date is None or company.registration_date > date.today():
         raise ApplicationDataMissingError()
     _validate_terms(product, application.requested_amount, application.term_months)
 
@@ -290,24 +334,102 @@ async def submit_application(
         session.add(credit_history)
     await session.flush()
 
+    required_fields = (
+        ["financials.revenue_annual"]
+        if financials.revenue_annual <= 0
+        else []
+    )
+    incomplete_payload = _build_snapshot_payload(
+        application,
+        company,
+        product,
+        financials,
+        credit_history,
+        risk_assessment=None,
+        required_fields=required_fields,
+    )
+    latest_snapshot = await session.scalar(
+        select(ApplicationSnapshot)
+        .where(ApplicationSnapshot.application_id == application.id)
+        .order_by(ApplicationSnapshot.snapshot_version.desc())
+        .limit(1)
+    )
+    if (
+        application.status == "NEED_MORE_DATA"
+        and latest_snapshot is not None
+        and latest_snapshot.payload == incomplete_payload
+    ):
+        return application, None, required_fields
+
+    snapshot_version = (
+        latest_snapshot.snapshot_version + 1 if latest_snapshot is not None else 1
+    )
+    snapshot_id = uuid4()
+    last_sequence = await session.scalar(
+        select(func.coalesce(func.max(ApplicationEvent.sequence), 0)).where(
+            ApplicationEvent.application_id == application.id
+        )
+    )
+    first_sequence = int(last_sequence or 0) + 1
+    previous_status = application.status
+
+    if required_fields:
+        session.add(
+            ApplicationSnapshot(
+                id=snapshot_id,
+                application_id=application.id,
+                snapshot_version=snapshot_version,
+                schema_version=4,
+                payload=incomplete_payload,
+            )
+        )
+        transitions = (
+            (
+                previous_status,
+                "SUBMITTED",
+                "APPLICATION_RESUBMITTED"
+                if previous_status == "NEED_MORE_DATA"
+                else "APPLICATION_SUBMITTED",
+                "USER",
+            ),
+            ("SUBMITTED", "DATA_CHECK", "DATA_CHECK_PASSED", "SYSTEM"),
+            ("DATA_CHECK", "NEED_MORE_DATA", "APPLICATION_DATA_REQUIRED", "SYSTEM"),
+        )
+        events = _apply_status_transitions(
+            application,
+            user_id,
+            transitions,
+            first_sequence,
+            snapshot_id,
+            snapshot_version,
+            extra_details={
+                "APPLICATION_DATA_REQUIRED": {"required_fields": required_fields}
+            },
+        )
+        session.add_all(events)
+        await session.commit()
+        await session.refresh(application)
+        return application, None, required_fields
+
     risk_assessment = await _score_application(
         application, company, product, financials, credit_history
     )
-
-    snapshot_id = uuid4()
+    snapshot_payload = _build_snapshot_payload(
+        application,
+        company,
+        product,
+        financials,
+        credit_history,
+        risk_assessment=risk_assessment,
+        required_fields=[],
+    )
     session.add(
         ApplicationSnapshot(
             id=snapshot_id,
             application_id=application.id,
-            schema_version=3,
-            payload=_build_snapshot_payload(
-                application,
-                company,
-                product,
-                financials,
-                credit_history,
-                risk_assessment,
-            ),
+            snapshot_version=snapshot_version,
+            schema_version=4,
+            payload=snapshot_payload,
         )
     )
     await session.flush()
@@ -328,7 +450,14 @@ async def submit_application(
     session.add(decision_record)
 
     transitions = (
-        ("DRAFT", "SUBMITTED", "APPLICATION_SUBMITTED", "USER"),
+        (
+            previous_status,
+            "SUBMITTED",
+            "APPLICATION_RESUBMITTED"
+            if previous_status == "NEED_MORE_DATA"
+            else "APPLICATION_SUBMITTED",
+            "USER",
+        ),
         ("SUBMITTED", "DATA_CHECK", "DATA_CHECK_PASSED", "SYSTEM"),
         (
             "DATA_CHECK",
@@ -343,40 +472,23 @@ async def submit_application(
             "SYSTEM",
         ),
     )
-    last_sequence = await session.scalar(
-        select(func.coalesce(func.max(ApplicationEvent.sequence), 0)).where(
-            ApplicationEvent.application_id == application.id
-        )
+    events = _apply_status_transitions(
+        application,
+        user_id,
+        transitions,
+        first_sequence,
+        snapshot_id,
+        snapshot_version,
+        extra_details={
+            "RISK_ASSESSMENT_COMPLETED": {
+                "risk_score": risk_assessment.risk_score,
+                "risk_level": risk_assessment.risk_level,
+                "top_factors": risk_assessment.top_factors,
+                "ai_advice_source": risk_assessment.ai_advice.source,
+            }
+        },
     )
-    for sequence, (from_status, to_status, event_type, actor_type) in enumerate(
-        transitions, start=int(last_sequence or 0) + 1
-    ):
-        if application.status != from_status:
-            raise ApplicationSubmissionConflictError()
-        application.status = to_status
-        session.add(
-            ApplicationEvent(
-                application_id=application.id,
-                sequence=sequence,
-                event_type=event_type,
-                from_status=from_status,
-                to_status=to_status,
-                actor_type=actor_type,
-                actor_user_id=user_id if actor_type == "USER" else None,
-                details=(
-                    {
-                        "snapshot_id": str(snapshot_id),
-                        "snapshot_schema_version": 3,
-                        "risk_score": risk_assessment.risk_score,
-                        "risk_level": risk_assessment.risk_level,
-                        "top_factors": risk_assessment.top_factors,
-                        "ai_advice_source": risk_assessment.ai_advice.source,
-                    }
-                    if event_type == "RISK_ASSESSMENT_COMPLETED"
-                    else {}
-                ),
-            )
-        )
+    session.add_all(events)
 
     decision_status = {
         "APPROVED": "DECISION",
@@ -389,7 +501,7 @@ async def submit_application(
     session.add(
         ApplicationEvent(
             application_id=application.id,
-            sequence=int(last_sequence or 0) + len(transitions) + 1,
+            sequence=first_sequence + len(transitions),
             event_type="APPLICATION_DECISION_RECORDED",
             from_status="SCORING",
             to_status=decision_status,
@@ -398,6 +510,7 @@ async def submit_application(
             details={
                 "decision_id": str(decision_record.id),
                 "snapshot_id": str(snapshot_id),
+                "snapshot_version": snapshot_version,
                 "outcome": decision_record.outcome,
                 "source": decision_record.source,
                 "risk_score": risk_assessment.risk_score,
@@ -412,7 +525,7 @@ async def submit_application(
     await session.commit()
     await session.refresh(application)
     await session.refresh(decision_record)
-    return application, decision_record
+    return application, decision_record, []
 
 
 async def list_application_events(

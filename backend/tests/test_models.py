@@ -102,9 +102,16 @@ def test_snapshots_and_events_have_database_level_constraints() -> None:
     }
 
     assert "schema_version > 0" in snapshot_constraints
+    assert "snapshot_version > 0" in snapshot_constraints
     assert "sequence > 0" in event_constraints
     assert "actor_type IN ('USER', 'SYSTEM')" in event_constraints
-    assert ApplicationSnapshot.__table__.c.application_id.unique is True
+    assert ApplicationSnapshot.__table__.c.application_id.unique is not True
+    snapshot_unique_columns = {
+        tuple(constraint.columns.keys())
+        for constraint in ApplicationSnapshot.__table_args__
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("application_id", "snapshot_version") in snapshot_unique_columns
 
 
 def test_application_decisions_have_database_level_domain_constraints() -> None:

@@ -432,7 +432,7 @@ async def test_submit_application_persists_fallback_decision(monkeypatch) -> Non
         assert saved_application is not None
         assert saved_application.status == "DECISION"
         assert snapshot is not None
-        assert snapshot.schema_version == 3
+        assert snapshot.schema_version == 4
         assert snapshot.payload["financials"]["revenue_annual"] == "12500000.00"
         assert snapshot.payload["financials"]["source"] == "DEMO"
         assert snapshot.payload["credit_history"]["source"] == "DEMO"
@@ -649,6 +649,193 @@ async def test_submission_persists_structured_llm_decision(
         assert history.json()[-1]["event_type"] == "APPLICATION_DECISION_RECORDED"
         assert history.json()[-1]["to_status"] == expected_status
         assert history.json()[-1]["details"]["outcome"] == outcome
+    finally:
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_need_more_data_can_be_corrected_and_resubmitted(monkeypatch) -> None:
+    email = ""
+    scoring_calls: list[dict[str, Any]] = []
+
+    def scoring_fallback(**kwargs: Any) -> dict[str, Any]:
+        scoring_calls.append(kwargs)
+        advice = CreditAdvice(
+            decision="APPROVED",
+            conditions=[],
+            recommended_product="Оборотный",
+            explanation="Подходит для оборотного капитала.",
+            top_risk_factors=["Низкая долговая нагрузка"],
+            next_step="Ознакомьтесь с предложением.",
+        )
+        return {
+            "decision": "APPROVED",
+            "risk_score": 25.0,
+            "risk_level": "Low",
+            "top_factors": ["Низкая долговая нагрузка"],
+            "ai_advice": {
+                "source": "Fallback_Rules",
+                "data": advice.model_dump(mode="json"),
+            },
+        }
+
+    monkeypatch.setattr(
+        application_workflow,
+        "score_and_explain",
+        scoring_fallback,
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            email, headers = await _register_company_user(client)
+            products = await client.get("/api/v1/credit-products")
+            product = products.json()[0]
+            created = await _create_draft(client, headers, product)
+            application_id = created.json()["id"]
+            company_id = created.json()["company_id"]
+
+            initial_financials = await client.get(
+                "/api/v1/company/financials", headers=headers
+            )
+            assert initial_financials.status_code == 200
+            invalid_financials = await client.patch(
+                "/api/v1/company/financials",
+                headers=headers,
+                json={"revenue_annual": 0},
+            )
+            assert invalid_financials.status_code == 200
+
+            needs_data = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=headers,
+            )
+            repeated_needs_data = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=headers,
+            )
+
+        assert needs_data.status_code == 200, needs_data.text
+        assert needs_data.json()["status"] == "NEED_MORE_DATA"
+        assert needs_data.json()["decision"] is None
+        assert needs_data.json()["required_fields"] == ["financials.revenue_annual"]
+        assert repeated_needs_data.json() == needs_data.json()
+        assert scoring_calls == []
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            repaired = await client.patch(
+                "/api/v1/company/financials",
+                headers=headers,
+                json={"revenue_annual": 13_000_000},
+            )
+            assert repaired.status_code == 200
+            resubmitted = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=headers,
+            )
+            history = await client.get(
+                f"/api/v1/applications/{application_id}/history",
+                headers=headers,
+            )
+
+        assert resubmitted.status_code == 200, resubmitted.text
+        assert resubmitted.json()["status"] == "DECISION"
+        assert resubmitted.json()["required_fields"] == []
+        assert resubmitted.json()["decision"]["outcome"] == "APPROVED"
+        assert len(scoring_calls) == 1
+        assert history.status_code == 200
+        assert "NEED_MORE_DATA" in [event["to_status"] for event in history.json()]
+        assert history.json()[-1]["to_status"] == "DECISION"
+
+        async with session_factory() as session:
+            snapshots = list(
+                await session.scalars(
+                    select(ApplicationSnapshot)
+                    .where(ApplicationSnapshot.application_id == application_id)
+                    .order_by(ApplicationSnapshot.snapshot_version)
+                )
+            )
+            saved_application = await session.get(Application, application_id)
+            saved_financials = await session.get(Financials, company_id)
+
+        assert [snapshot.snapshot_version for snapshot in snapshots] == [1, 2]
+        assert all(snapshot.schema_version == 4 for snapshot in snapshots)
+        assert snapshots[0].payload["required_fields"] == [
+            "financials.revenue_annual"
+        ]
+        assert snapshots[0].payload["risk_assessment"] is None
+        assert snapshots[1].payload["required_fields"] == []
+        assert snapshots[1].payload["risk_assessment"]["ai_advice"]["source"] == (
+            "Fallback_Rules"
+        )
+        assert saved_application is not None
+        assert saved_application.status == "DECISION"
+        assert saved_financials is not None
+        assert saved_financials.revenue_annual == Decimal("13000000")
+    finally:
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_missing_official_registration_date_stays_draft(monkeypatch) -> None:
+    email = ""
+    scoring_calls: list[dict[str, Any]] = []
+
+    def scoring(**kwargs: Any) -> dict[str, Any]:
+        scoring_calls.append(kwargs)
+        raise AssertionError("scoring must not run without official registration date")
+
+    monkeypatch.setattr(application_workflow, "score_and_explain", scoring)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            email, headers = await _register_company_user(client)
+            products = await client.get("/api/v1/credit-products")
+            created = await _create_draft(client, headers, products.json()[0])
+            application_id = created.json()["id"]
+            company_id = created.json()["company_id"]
+
+            async with session_factory() as session:
+                company = await session.get(Company, company_id)
+                assert company is not None
+                company.registration_date = None
+                await session.commit()
+
+            response = await client.post(
+                f"/api/v1/applications/{application_id}/submit",
+                headers=headers,
+            )
+            detail = await client.get(
+                f"/api/v1/applications/{application_id}", headers=headers
+            )
+
+        assert response.status_code == 409
+        assert detail.status_code == 200
+        assert detail.json()["status"] == "DRAFT"
+        assert scoring_calls == []
+        async with session_factory() as session:
+            snapshot = await session.scalar(
+                select(ApplicationSnapshot).where(
+                    ApplicationSnapshot.application_id == application_id
+                )
+            )
+            events = list(
+                await session.scalars(
+                    select(ApplicationEvent).where(
+                        ApplicationEvent.application_id == application_id
+                    )
+                )
+            )
+        assert snapshot is None
+        assert len(events) == 1
+        assert events[0].event_type == "APPLICATION_DRAFT_CREATED"
     finally:
         if email:
             await _cleanup_user(email)

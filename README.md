@@ -26,7 +26,7 @@
 - Кредитная история: агрегированный просмотр через `CreditHistoryProvider`; пока только синтетический demo provider, реальные данные БКИ не подключены.
 - Каталог: список и карточка кредитного продукта. Все условия синтетические и помечены `DEMO`.
 - Скоринг компании: `POST /api/v1/company/score` использует сохранённые данные, ML-фасад и Qwen 3.5 4B через Ollama; при недоступности модели используется `Fallback_Rules`.
-- Заявки: submit передаёт snapshot версии 3, продукт и срок ML-фасаду; структурированный исход (`APPROVED`, `CONDITIONAL_APPROVAL`, `REJECTED`) и fallback сохраняются в `ApplicationDecision` и аудите. `CONDITIONAL_APPROVAL` требует ручной проверки.
+- Заявки: submit передаёт snapshot схемы версии 4, продукт и срок ML-фасаду; попытки snapshot версионируются. При нулевой выручке заявка получает `NEED_MORE_DATA`, пользователь исправляет финансы и повторяет submit. Официальная дата регистрации редактируется только provider-ом. Структурированный исход (`APPROVED`, `CONDITIONAL_APPROVAL`, `REJECTED`) и fallback сохраняются в `ApplicationDecision` и аудите. `CONDITIONAL_APPROVAL` требует ручной проверки.
 - Тесты Backend запускаются командой `make test` на отдельной временной PostgreSQL.
 
 ## Что ещё не реализовано

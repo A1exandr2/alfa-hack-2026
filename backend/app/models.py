@@ -207,6 +207,14 @@ class ApplicationSnapshot(Base):
         CheckConstraint(
             "schema_version > 0", name="ck_application_snapshot_version_positive"
         ),
+        CheckConstraint(
+            "snapshot_version > 0", name="ck_application_snapshot_attempt_positive"
+        ),
+        UniqueConstraint(
+            "application_id",
+            "snapshot_version",
+            name="uq_application_snapshots_version",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -216,8 +224,8 @@ class ApplicationSnapshot(Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("applications.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
     )
+    snapshot_version: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
