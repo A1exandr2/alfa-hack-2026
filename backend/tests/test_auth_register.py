@@ -27,6 +27,7 @@ async def test_register_creates_user_without_linking_company() -> None:
         assert response.status_code == 201
         body = response.json()
         assert body["user"]["email"] == email
+        assert body["user"]["role"] == "USER"
         assert body["user"]["company_id"] is None
         assert body["access_token"]
         assert body["token_type"] == "bearer"
@@ -35,6 +36,7 @@ async def test_register_creates_user_without_linking_company() -> None:
             user = await session.scalar(select(User).where(User.email == email))
             assert user is not None
             assert user.password_hash != "StrongPass123!"
+            assert user.role == "USER"
             assert user.company_id is None
     finally:
         async with session_factory() as session:

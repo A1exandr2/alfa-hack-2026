@@ -52,6 +52,9 @@ class Company(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("role IN ('USER', 'REVIEWER')", name="ck_users_role"),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
@@ -59,6 +62,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="USER", server_default="USER"
+    )
     company_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
     )

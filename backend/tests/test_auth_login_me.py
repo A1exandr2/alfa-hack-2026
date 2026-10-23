@@ -48,6 +48,7 @@ async def test_login_returns_jwt_and_me_returns_current_user() -> None:
             assert login_response.status_code == 200
             login_body = login_response.json()
             assert login_body["user"]["id"] == str(user_id)
+            assert login_body["user"]["role"] == "USER"
             assert login_body["token_type"] == "bearer"
             assert login_body["access_token"]
 
@@ -63,6 +64,7 @@ async def test_login_returns_jwt_and_me_returns_current_user() -> None:
                 "id": str(user_id),
                 "email": email,
                 "full_name": "Иван Иванов",
+                "role": "USER",
                 "company_id": str(company_id),
             }
     finally:

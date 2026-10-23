@@ -49,6 +49,7 @@ Content-Type: application/json
 ```
 
 Регистрация создаёт пользователя без компании. Привязка компании по ИНН выполняется отдельным запросом `POST /api/v1/company/link` после входа.
+Каждому новому пользователю назначается роль `USER`. Поле `role` нельзя передать при регистрации; роль `REVIEWER` назначается только доверенным оператором вне публичного API.
 
 Запрос:
 
@@ -68,6 +69,7 @@ Content-Type: application/json
     "id": "00000000-0000-0000-0000-000000000010",
     "email": "ivan@example.com",
     "full_name": "Иван Иванов",
+    "role": "USER",
     "company_id": null
   },
   "access_token": "<jwt>",
@@ -118,9 +120,12 @@ Authorization: Bearer ***
   "id": "00000000-0000-0000-0000-000000000010",
   "email": "ivan@example.com",
   "full_name": "Иван Иванов",
+  "role": "USER",
   "company_id": null
 }
 ```
+
+Пользовательская роль читается из БД при каждом запросе; reviewer-only операции будут требовать `REVIEWER` и возвращать `403` для `USER`. Endpoint’ы ручного approve/reject в этом срезе ещё не добавлены.
 
 Ошибки:
 
