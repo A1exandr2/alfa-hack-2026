@@ -78,6 +78,13 @@ class ApplicationScoringError(ApplicationError):
         super().__init__("Application risk scoring could not be completed")
 
 
+class ApplicationDecisionNotFoundError(ApplicationError):
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("Application decision not found")
+
+
 async def _get_active_product(
     session: AsyncSession, product_id: UUID
 ) -> CreditProduct:

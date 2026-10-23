@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -9,6 +10,7 @@ from ml.facade import score_and_explain
 
 from app.applications.schemas import ApplicationRiskAssessment
 from app.applications.service import (
+    ApplicationDecisionNotFoundError,
     ApplicationDataMissingError,
     ApplicationDataProviderError,
     ApplicationNotFoundError,
@@ -24,6 +26,7 @@ from app.integrations.credit_history import (
 from app.integrations.financials import FinancialProvider, FinancialProviderError
 from app.models import (
     Application,
+    ApplicationDecision,
     ApplicationEvent,
     ApplicationSnapshot,
     Company,
@@ -36,9 +39,18 @@ from app.models import (
 def _build_scoring_input(
     application: Application,
     company: Company,
+    product: CreditProduct,
     financials: Financials,
     credit_history: CreditHistory,
-) -> tuple[dict[str, float], dict[str, float], dict[str, float | int], float, str]:
+) -> tuple[
+    dict[str, float],
+    dict[str, float],
+    dict[str, float | int],
+    float,
+    str,
+    int,
+    dict[str, str | float | int],
+]:
     registration_date = company.registration_date
     today = date.today()
     revenue = float(financials.revenue_annual)
@@ -58,18 +70,29 @@ def _build_scoring_input(
         ),
         "debt_load": float(financials.current_debt) / revenue,
     }
+    product_features: dict[str, str | float | int] = {
+        "name": product.name,
+        "interest_rate": float(product.interest_rate),
+        "min_amount": float(product.min_amount),
+        "max_amount": float(product.max_amount),
+        "min_term_months": product.min_term_months,
+        "max_term_months": product.max_term_months,
+    }
     return (
         company_features,
         financial_features,
         credit_features,
         float(application.requested_amount),
         application.purpose,
+        application.term_months,
+        product_features,
     )
 
 
 async def _score_application(
     application: Application,
     company: Company,
+    product: CreditProduct,
     financials: Financials,
     credit_history: CreditHistory,
 ) -> ApplicationRiskAssessment:
@@ -79,7 +102,11 @@ async def _score_application(
         credit_features,
         loan_amount,
         user_query,
-    ) = _build_scoring_input(application, company, financials, credit_history)
+        loan_term_months,
+        product_features,
+    ) = _build_scoring_input(
+        application, company, product, financials, credit_history
+    )
     try:
         result = await run_in_threadpool(
             score_and_explain,
@@ -88,6 +115,8 @@ async def _score_application(
             credit=credit_features,
             loan_amount=loan_amount,
             user_query=user_query,
+            loan_term_months=loan_term_months,
+            product=product_features,
         )
         return ApplicationRiskAssessment.model_validate(result)
     except Exception as error:
@@ -216,7 +245,7 @@ async def submit_application(
     application_id: UUID,
     financial_provider: FinancialProvider,
     credit_history_provider: CreditHistoryProvider,
-) -> Application:
+) -> tuple[Application, ApplicationDecision | None]:
     application = await session.scalar(
         select(Application)
         .where(
@@ -228,16 +257,19 @@ async def submit_application(
     if application is None:
         raise ApplicationNotFoundError()
 
-    if application.status == "SCORING":
+    if application.status != "DRAFT":
         snapshot = await session.scalar(
             select(ApplicationSnapshot).where(
                 ApplicationSnapshot.application_id == application.id
             )
         )
         if snapshot is not None:
-            return application
-        raise ApplicationSubmissionConflictError()
-    if application.status != "DRAFT":
+            decision = await session.scalar(
+                select(ApplicationDecision).where(
+                    ApplicationDecision.application_id == application.id
+                )
+            )
+            return application, decision
         raise ApplicationSubmissionConflictError()
 
     company = await session.get(Company, application.company_id)
@@ -259,7 +291,7 @@ async def submit_application(
     await session.flush()
 
     risk_assessment = await _score_application(
-        application, company, financials, credit_history
+        application, company, product, financials, credit_history
     )
 
     snapshot_id = uuid4()
@@ -267,7 +299,7 @@ async def submit_application(
         ApplicationSnapshot(
             id=snapshot_id,
             application_id=application.id,
-            schema_version=2,
+            schema_version=3,
             payload=_build_snapshot_payload(
                 application,
                 company,
@@ -278,6 +310,22 @@ async def submit_application(
             ),
         )
     )
+    await session.flush()
+
+    decision_record = ApplicationDecision(
+        application_id=application.id,
+        snapshot_id=snapshot_id,
+        outcome=risk_assessment.decision,
+        source=risk_assessment.ai_advice.source,
+        risk_score=Decimal(str(risk_assessment.risk_score)),
+        risk_level=risk_assessment.risk_level,
+        explanation=risk_assessment.ai_advice.data.explanation,
+        recommended_product=risk_assessment.ai_advice.data.recommended_product,
+        next_step=risk_assessment.ai_advice.data.next_step,
+        top_factors=risk_assessment.ai_advice.data.top_risk_factors,
+        conditions=risk_assessment.ai_advice.data.conditions,
+    )
+    session.add(decision_record)
 
     transitions = (
         ("DRAFT", "SUBMITTED", "APPLICATION_SUBMITTED", "USER"),
@@ -318,7 +366,7 @@ async def submit_application(
                 details=(
                     {
                         "snapshot_id": str(snapshot_id),
-                        "snapshot_schema_version": 2,
+                        "snapshot_schema_version": 3,
                         "risk_score": risk_assessment.risk_score,
                         "risk_level": risk_assessment.risk_level,
                         "top_factors": risk_assessment.top_factors,
@@ -330,9 +378,41 @@ async def submit_application(
             )
         )
 
+    decision_status = {
+        "APPROVED": "DECISION",
+        "CONDITIONAL_APPROVAL": "MANUAL_REVIEW",
+        "REJECTED": "REJECTED",
+    }[risk_assessment.decision]
+    if application.status != "SCORING":
+        raise ApplicationSubmissionConflictError()
+    application.status = decision_status
+    session.add(
+        ApplicationEvent(
+            application_id=application.id,
+            sequence=int(last_sequence or 0) + len(transitions) + 1,
+            event_type="APPLICATION_DECISION_RECORDED",
+            from_status="SCORING",
+            to_status=decision_status,
+            actor_type="SYSTEM",
+            actor_user_id=None,
+            details={
+                "decision_id": str(decision_record.id),
+                "snapshot_id": str(snapshot_id),
+                "outcome": decision_record.outcome,
+                "source": decision_record.source,
+                "risk_score": risk_assessment.risk_score,
+                "risk_level": risk_assessment.risk_level,
+                "explanation": decision_record.explanation,
+                "top_factors": decision_record.top_factors,
+                "conditions": decision_record.conditions,
+            },
+        )
+    )
+
     await session.commit()
     await session.refresh(application)
-    return application
+    await session.refresh(decision_record)
+    return application, decision_record
 
 
 async def list_application_events(
@@ -347,3 +427,19 @@ async def list_application_events(
         .order_by(ApplicationEvent.sequence)
     )
     return list(result)
+
+
+async def get_application_decision(
+    session: AsyncSession,
+    user_id: UUID,
+    application_id: UUID,
+) -> ApplicationDecision:
+    await get_application(session, user_id, application_id)
+    decision = await session.scalar(
+        select(ApplicationDecision).where(
+            ApplicationDecision.application_id == application_id
+        )
+    )
+    if decision is None:
+        raise ApplicationDecisionNotFoundError()
+    return decision

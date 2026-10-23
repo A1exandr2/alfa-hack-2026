@@ -46,5 +46,5 @@ def get_ai_advice(
         return {"source": "AI", "data": ai_response.model_dump()}
     except Exception as e:
         logger.warning("Ollama unavailable or invalid response (%s); using rules", type(e).__name__)
-        fb = rule_based_fallback(raw_data)
+        fb = rule_based_fallback(raw_data, risk_score)
         return {"source": "Fallback_Rules", "data": fb.model_dump()}

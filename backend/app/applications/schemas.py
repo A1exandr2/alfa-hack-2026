@@ -85,18 +85,62 @@ class ApplicationEventResponse(BaseModel):
     details: dict[str, object]
 
 
+class ScoringAdviceDataSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["APPROVED", "CONDITIONAL_APPROVAL", "REJECTED"]
+    conditions: list[str]
+    recommended_product: Literal[
+        "Оборотный", "Инвестиционный", "Рефинансирование"
+    ]
+    explanation: str
+    top_risk_factors: list[str]
+    next_step: str
+
+
 class ScoringAdviceSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["AI", "Fallback_Rules"]
-    data: dict[str, object]
+    data: ScoringAdviceDataSnapshot
 
 
 class ApplicationRiskAssessment(BaseModel):
-    # The facade also returns `decision`; Backend deliberately ignores it.
     model_config = ConfigDict(extra="ignore")
 
+    decision: Literal["APPROVED", "CONDITIONAL_APPROVAL", "REJECTED"]
     risk_score: float = Field(ge=0, le=100, allow_inf_nan=False)
     risk_level: Literal["Low", "Medium", "High"]
     top_factors: list[str]
     ai_advice: ScoringAdviceSnapshot
+
+    @model_validator(mode="after")
+    def validate_decision_consistency(self) -> "ApplicationRiskAssessment":
+        if self.decision != self.ai_advice.data.decision:
+            raise ValueError("Decision does not match the normalized AI advice")
+        if self.decision == "CONDITIONAL_APPROVAL" and not self.ai_advice.data.conditions:
+            raise ValueError("Conditional approval must include review conditions")
+        if self.decision != "CONDITIONAL_APPROVAL" and self.ai_advice.data.conditions:
+            raise ValueError("Only conditional approval may include review conditions")
+        return self
+
+
+class ApplicationDecisionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    outcome: Literal["APPROVED", "CONDITIONAL_APPROVAL", "REJECTED"]
+    source: Literal["AI", "Fallback_Rules"]
+    risk_score: float
+    risk_level: Literal["Low", "Medium", "High"]
+    explanation: str
+    recommended_product: Literal[
+        "Оборотный", "Инвестиционный", "Рефинансирование"
+    ]
+    next_step: str
+    top_factors: list[str]
+    conditions: list[str]
+    created_at: datetime
+
+
+class ApplicationSubmissionResponse(ApplicationResponse):
+    decision: ApplicationDecisionResponse | None = None

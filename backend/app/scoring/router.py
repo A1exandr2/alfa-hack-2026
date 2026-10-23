@@ -33,7 +33,7 @@ class AdviceResponse(BaseModel):
 class ScoreResponse(BaseModel):
     risk_score: float
     risk_level: Literal['Low', 'Medium', 'High']
-    decision: Literal['APPROVED', 'MANUAL_REVIEW']
+    decision: Literal['APPROVED', 'CONDITIONAL_APPROVAL', 'REJECTED']
     top_factors: list[str]
     ai_advice: AdviceResponse
 

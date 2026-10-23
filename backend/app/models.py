@@ -225,6 +225,62 @@ class ApplicationSnapshot(Base):
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
 
 
+class ApplicationDecision(Base):
+    __tablename__ = "application_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('APPROVED', 'CONDITIONAL_APPROVAL', 'REJECTED')",
+            name="ck_application_decisions_outcome",
+        ),
+        CheckConstraint(
+            "source IN ('AI', 'Fallback_Rules')",
+            name="ck_application_decisions_source",
+        ),
+        CheckConstraint(
+            "risk_score >= 0 AND risk_score <= 100",
+            name="ck_application_decisions_score_range",
+        ),
+        CheckConstraint(
+            "risk_level IN ('Low', 'Medium', 'High')",
+            name="ck_application_decisions_risk_level",
+        ),
+        CheckConstraint(
+            "recommended_product IN ('Оборотный', 'Инвестиционный', 'Рефинансирование')",
+            name="ck_application_decisions_recommended_product",
+        ),
+        UniqueConstraint(
+            "application_id", name="uq_application_decisions_application_id"
+        ),
+        UniqueConstraint("snapshot_id", name="uq_application_decisions_snapshot_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    application_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("application_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    risk_score: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_product: Mapped[str] = mapped_column(String(32), nullable=False)
+    next_step: Mapped[str] = mapped_column(Text, nullable=False)
+    top_factors: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    conditions: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ApplicationEvent(Base):
     __tablename__ = "application_events"
     __table_args__ = (

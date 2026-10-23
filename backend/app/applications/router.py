@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.applications.schemas import (
     ApplicationCreateRequest,
+    ApplicationDecisionResponse,
     ApplicationEventResponse,
     ApplicationResponse,
+    ApplicationSubmissionResponse,
     ApplicationUpdateRequest,
 )
 from app.applications.service import (
@@ -16,6 +18,11 @@ from app.applications.service import (
     get_application,
     list_applications,
     update_application,
+)
+from app.applications.workflow import (
+    get_application_decision,
+    list_application_events,
+    submit_application,
 )
 from app.auth.dependencies import get_current_user
 from app.database import get_db_session
@@ -28,7 +35,6 @@ from app.integrations.financials import (
     get_financial_provider,
 )
 from app.models import User
-from app.applications.workflow import list_application_events, submit_application
 
 
 router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
@@ -64,7 +70,9 @@ async def get_applications(
     return [ApplicationResponse.model_validate(item) for item in applications]
 
 
-@router.post("/{application_id}/submit", response_model=ApplicationResponse)
+@router.post(
+    "/{application_id}/submit", response_model=ApplicationSubmissionResponse
+)
 async def submit_application_for_scoring(
     application_id: UUID,
     user: User = Depends(get_current_user),
@@ -73,9 +81,9 @@ async def submit_application_for_scoring(
     credit_history_provider: CreditHistoryProvider = Depends(
         get_credit_history_provider
     ),
-) -> ApplicationResponse:
+) -> ApplicationSubmissionResponse:
     try:
-        application = await submit_application(
+        application, decision = await submit_application(
             session,
             user.id,
             application_id,
@@ -84,7 +92,14 @@ async def submit_application_for_scoring(
         )
     except ApplicationError as error:
         _raise_http_error(error)
-    return ApplicationResponse.model_validate(application)
+    return ApplicationSubmissionResponse(
+        **ApplicationResponse.model_validate(application).model_dump(),
+        decision=(
+            ApplicationDecisionResponse.model_validate(decision)
+            if decision is not None
+            else None
+        ),
+    )
 
 
 @router.get(
@@ -101,6 +116,22 @@ async def get_application_history(
     except ApplicationError as error:
         _raise_http_error(error)
     return [ApplicationEventResponse.model_validate(event) for event in events]
+
+
+@router.get(
+    "/{application_id}/decision",
+    response_model=ApplicationDecisionResponse,
+)
+async def get_application_decision_details(
+    application_id: UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApplicationDecisionResponse:
+    try:
+        decision = await get_application_decision(session, user.id, application_id)
+    except ApplicationError as error:
+        _raise_http_error(error)
+    return ApplicationDecisionResponse.model_validate(decision)
 
 
 @router.get("/{application_id}", response_model=ApplicationResponse)

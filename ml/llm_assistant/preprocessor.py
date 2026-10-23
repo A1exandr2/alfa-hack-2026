@@ -22,15 +22,31 @@ def enrich_data_for_llm(
 ) -> dict:
     """
     Превращает сырые цифры в текстовый контекст для LLM.
-    Включает заранее рассчитанный risk_score — модели остаётся только интерпретировать.
+    Включает заранее рассчитанный risk_score и данные конкретной заявки.
     """
+    product = raw_data.get("product")
+    if product is None:
+        product_context = "Продукт не выбран."
+    else:
+        product_context = (
+            f"Продукт: {product['name']}; ставка: {product['interest_rate']}%; "
+            f"сумма: {product['min_amount']}–{product['max_amount']} руб.; "
+            f"срок: {product['min_term_months']}–{product['max_term_months']} мес."
+        )
+    loan_term = raw_data.get("loan_term_months")
+    loan_term_context = (
+        f"{loan_term} мес." if loan_term is not None else "не указан"
+    )
     context = f"""
     Данные компании:
     - Возраст: {raw_data['company_age']} лет.
+    - Выручка за год: {raw_data['revenue']} руб.
     - Рентабельность: {raw_data['profit_margin'] * 100:.1f}%.
     - Долговая нагрузка (Долг/Выручка): {raw_data['debt_load']:.2f}.
     - Просрочки в БКИ: {'Да' if raw_data['has_overdue'] else 'Нет'}.
     - Запрашиваемая сумма: {raw_data['loan_amount']} руб.
+    - Запрашиваемый срок: {loan_term_context}
+    - {product_context}
 
     Автоматический скоринг:
     - Риск-скор: {risk_score:.1f}/100.

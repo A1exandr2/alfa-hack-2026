@@ -243,7 +243,7 @@ curl http://127.0.0.1:8080/api/v1/applications/{application_id}/history \
   -H 'Authorization: Bearer ***'
 ```
 
-При успешной подготовке данных Backend вызывает `ml.facade.score_and_explain` вне async event loop и сохраняет оценку вместе с входными данными в snapshot версии 2. Статус `SCORING` означает, что оценка получена и ожидает бизнес-решения Backend; поле ML `decision` не используется. Snapshot и переходы фиксируются атомарно; сбой provider или невалидный результат фасада возвращает `502`, оставляя заявку в `DRAFT` без новых данных и переходов (сохраняется только событие создания черновика). Ошибка Ollama обрабатывается внутри фасада через `Fallback_Rules`.
+При успешной подготовке данных Backend вызывает `ml.facade.score_and_explain` вне async event loop, передавая snapshot, продукт и срок. Неизменяемый snapshot версии 3, запись `ApplicationDecision` и audit events сохраняются атомарно. `APPROVED` переводит заявку в `DECISION`, `CONDITIONAL_APPROVAL` — в `MANUAL_REVIEW`, `REJECTED` — в `REJECTED`. При недоступной Ollama фасад возвращает тот же контракт из `Fallback_Rules`; исключение фасада или невалидный ответ возвращает `502` и оставляет заявку в `DRAFT`.
 
 Подробные схемы и коды ошибок: [API-контракт](api.md).
 
@@ -303,9 +303,10 @@ GET  /api/v1/applications/{application_id}
 PATCH /api/v1/applications/{application_id}
 POST /api/v1/applications/{application_id}/submit
 GET  /api/v1/applications/{application_id}/history
+GET  /api/v1/applications/{application_id}/decision
 ```
 
-Application submit строит признаки из данных заявки и вызывает общий `ml.facade.score_and_explain`; результат и источник AI/fallback сохраняются в snapshot версии 2. Отдельный `POST /api/v1/company/score` остаётся доступен. Ни один из этих путей не формирует финальное решение или предложение: это следующий Backend-срез.
+Application submit строит признаки из snapshot, передаёт срок и выбранный продукт в общий `ml.facade.score_and_explain`, затем сохраняет outcome, source, объяснение, факторы и условия в `ApplicationDecision`. Исход возвращается вместе с submit response и через `GET /api/v1/applications/{id}/decision`. Отдельный `POST /api/v1/company/score` остаётся доступен. Предложение и его подтверждение — следующий Backend-срез.
 
 ## Скоринг и Ollama в dev
 

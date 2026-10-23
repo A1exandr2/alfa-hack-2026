@@ -15,9 +15,11 @@ from app.integrations.credit_history import (
     get_credit_history_provider,
 )
 from ml.facade import score_and_explain as ml_score_and_explain
+from ml.llm_assistant.schemas import CreditAdvice
 
 from app.models import (
     Application,
+    ApplicationDecision,
     ApplicationEvent,
     ApplicationSnapshot,
     Company,
@@ -328,7 +330,7 @@ async def test_application_requires_linked_company_and_product_limits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch) -> None:
+async def test_submit_application_persists_fallback_decision(monkeypatch) -> None:
     email = ""
     scoring_inputs: list[dict[str, Any]] = []
 
@@ -338,7 +340,6 @@ async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch
     def fake_score_and_explain(**kwargs: Any) -> dict[str, Any]:
         scoring_inputs.append(kwargs)
         result = ml_score_and_explain(**kwargs)
-        result["decision"] = "REJECTED"
         return result
 
     monkeypatch.setattr("ollama.Client.chat", unavailable_ollama)
@@ -377,26 +378,36 @@ async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch
                 headers=headers,
                 json={"purpose": "Изменение после отправки"},
             )
+            decision_response = await client.get(
+                f"/api/v1/applications/{created.json()['id']}/decision",
+                headers=headers,
+            )
 
         assert response.status_code == 200, response.text
-        assert response.json()["status"] == "SCORING"
+        assert response.json()["status"] == "DECISION"
+        assert response.json()["decision"]["outcome"] == "APPROVED"
+        assert response.json()["decision"]["source"] == "Fallback_Rules"
         assert repeated.status_code == 200
         assert repeated.json() == response.json()
+        assert decision_response.status_code == 200
+        assert decision_response.json()["outcome"] == "APPROVED"
+        assert decision_response.json()["source"] == "Fallback_Rules"
         assert financial_update.status_code == 200
         assert financial_update.json()["revenue_annual"] == 99_000_000.0
         assert edit_after_submit.status_code == 409
         assert history.status_code == 200
-        assert [event["sequence"] for event in history.json()] == [1, 2, 3, 4, 5]
+        assert [event["sequence"] for event in history.json()] == [1, 2, 3, 4, 5, 6]
         assert [event["to_status"] for event in history.json()] == [
             "DRAFT",
             "SUBMITTED",
             "DATA_CHECK",
             "DATA_ENRICHMENT",
             "SCORING",
+            "DECISION",
         ]
         assert history.json()[0]["event_type"] == "APPLICATION_DRAFT_CREATED"
-        assert history.json()[-1]["event_type"] == "RISK_ASSESSMENT_COMPLETED"
-        assert history.json()[-1]["details"]["risk_level"] == "Low"
+        assert history.json()[-1]["event_type"] == "APPLICATION_DECISION_RECORDED"
+        assert history.json()[-1]["details"]["outcome"] == "APPROVED"
         assert history.json()[0]["actor_type"] == "USER"
         assert history.json()[1]["actor_type"] == "USER"
         assert all(event["actor_type"] == "SYSTEM" for event in history.json()[2:])
@@ -419,9 +430,9 @@ async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch
             saved_history = await session.get(CreditHistory, company_id)
 
         assert saved_application is not None
-        assert saved_application.status == "SCORING"
+        assert saved_application.status == "DECISION"
         assert snapshot is not None
-        assert snapshot.schema_version == 2
+        assert snapshot.schema_version == 3
         assert snapshot.payload["financials"]["revenue_annual"] == "12500000.00"
         assert snapshot.payload["financials"]["source"] == "DEMO"
         assert snapshot.payload["credit_history"]["source"] == "DEMO"
@@ -430,7 +441,7 @@ async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch
         assert saved_financials.revenue_annual == Decimal("99000000")
         assert saved_history is not None
         assert saved_history.source == "DEMO"
-        assert len(events) == 5
+        assert len(events) == 6
         assert len(scoring_inputs) == 1
         scoring_input = scoring_inputs[0]
         assert scoring_input["company"]["company_age"] > 0
@@ -446,12 +457,14 @@ async def test_submit_application_prepares_data_and_moves_to_scoring(monkeypatch
             Decimal(created.json()["requested_amount"])
         )
         assert scoring_input["user_query"] == "Пополнение оборотных средств"
+        assert scoring_input["loan_term_months"] == created.json()["term_months"]
+        assert scoring_input["product"]["name"] == products.json()[0]["name"]
         risk_assessment = snapshot.payload["risk_assessment"]
         assert risk_assessment["risk_score"] == 25.0
         assert risk_assessment["risk_level"] == "Low"
-        assert "decision" not in risk_assessment
+        assert risk_assessment["decision"] == "APPROVED"
         assert risk_assessment["ai_advice"]["source"] == "Fallback_Rules"
-        assert events[-1].event_type == "RISK_ASSESSMENT_COMPLETED"
+        assert events[-1].event_type == "APPLICATION_DECISION_RECORDED"
         assert events[-1].details["risk_score"] == 25.0
     finally:
         if email:
@@ -568,6 +581,74 @@ async def test_scoring_failure_rolls_back_submission(monkeypatch) -> None:
         assert len(events) == 1
         assert saved_financials is None
         assert saved_history is None
+    finally:
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_status", "conditions"),
+    [
+        (
+            "CONDITIONAL_APPROVAL",
+            "MANUAL_REVIEW",
+            ["Требуется ручная проверка финансовых данных."],
+        ),
+        ("REJECTED", "REJECTED", []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_submission_persists_structured_llm_decision(
+    monkeypatch, outcome: str, expected_status: str, conditions: list[str]
+) -> None:
+    email = ""
+    selected_product: dict[str, Any] = {}
+
+    def llm_decision(self, **kwargs: Any) -> dict[str, Any]:
+        context = kwargs["messages"][1]["content"]
+        assert selected_product["name"] in context
+        assert f"{selected_product['min_term_months']} мес." in context
+        payload = CreditAdvice(
+            decision=outcome,
+            conditions=conditions,
+            recommended_product="Оборотный",
+            explanation="Показатели требуют дополнительной проверки.",
+            top_risk_factors=["Умеренная долговая нагрузка"],
+            next_step="Дождитесь ручной проверки.",
+        )
+        return {"message": {"content": payload.model_dump_json()}}
+
+    monkeypatch.setattr("ollama.Client.chat", llm_decision)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            email, headers = await _register_company_user(client)
+            products = await client.get("/api/v1/credit-products")
+            selected_product = products.json()[0]
+            created = await _create_draft(client, headers, selected_product)
+            response = await client.post(
+                f"/api/v1/applications/{created.json()['id']}/submit",
+                headers=headers,
+            )
+            history = await client.get(
+                f"/api/v1/applications/{created.json()['id']}/history",
+                headers=headers,
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == expected_status
+        assert response.json()["decision"]["outcome"] == outcome
+        assert response.json()["decision"]["source"] == "AI"
+        assert response.json()["decision"]["conditions"] == conditions
+        assert response.json()["decision"]["top_factors"] == ["Умеренная долговая нагрузка"]
+        assert response.json()["decision"]["recommended_product"] == "Оборотный"
+        assert response.json()["decision"]["next_step"] == "Дождитесь ручной проверки."
+        assert history.status_code == 200
+        assert history.json()[-1]["event_type"] == "APPLICATION_DECISION_RECORDED"
+        assert history.json()[-1]["to_status"] == expected_status
+        assert history.json()[-1]["details"]["outcome"] == outcome
     finally:
         if email:
             await _cleanup_user(email)

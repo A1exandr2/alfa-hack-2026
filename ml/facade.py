@@ -2,7 +2,7 @@
 from typing import Optional
 
 from ml.llm_assistant.service import get_ai_advice
-from ml.risk_scoring import calculate_risk, get_decision, get_risk_level
+from ml.risk_scoring import calculate_risk, get_risk_level
 
 
 def score_and_explain(
@@ -11,9 +11,11 @@ def score_and_explain(
     credit: dict,
     loan_amount: float,
     user_query: Optional[str] = None,
+    loan_term_months: Optional[int] = None,
+    product: Optional[dict] = None,
 ) -> dict:
     """
-    Полный ML-пайплайн: скоринг + LLM-объяснение.
+    Полный ML-пайплайн: rule-based risk score + LLM-исход и объяснение.
 
     Args:
         company: {"company_age": float}
@@ -21,21 +23,22 @@ def score_and_explain(
         credit: {"has_overdue": int, "debt_load": float}
         loan_amount: сумма кредита
         user_query: дополнительная информация от клиента
+        loan_term_months: срок заявки в месяцах, если выбран продукт
+        product: выбранный продукт и его ограничения, если он есть
     
     Returns:
         {
             "risk_score": float, 
             "risk_level": "Low" | "Medium" | "High",
-            "decision": "APPROVED" | "MANUAL_REVIEW", 
+            "decision": "APPROVED" | "CONDITIONAL_APPROVAL" | "REJECTED",
             "top_factors": [str],
-            "ai_advice": None | {"source": "AI"|"Fallback_Rules", "data": {...}}
+            "ai_advice": {"source": "AI"|"Fallback_Rules", "data": {...}}
         }
     """
     score, factors = calculate_risk(company, financials, credit)
     result = {
         "risk_score": score, 
         "risk_level": get_risk_level(score),
-        "decision": get_decision(score), 
         "top_factors": factors,
         "ai_advice": None
     }
@@ -55,8 +58,11 @@ def score_and_explain(
         "debt_load": credit["debt_load"],
         "loan_amount": loan_amount,
         "user_query": effective_query,
+        "loan_term_months": loan_term_months,
+        "product": product,
     }
 
     result["ai_advice"] = get_ai_advice(raw, score, factors)
+    result["decision"] = result["ai_advice"]["data"]["decision"]
 
     return result

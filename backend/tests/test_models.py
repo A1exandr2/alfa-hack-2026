@@ -1,7 +1,8 @@
-from sqlalchemy import CheckConstraint, inspect
+from sqlalchemy import CheckConstraint, UniqueConstraint, inspect
 
 from app.models import (
     Application,
+    ApplicationDecision,
     ApplicationEvent,
     ApplicationSnapshot,
     Base,
@@ -18,6 +19,7 @@ def test_credit_domain_tables_are_registered() -> None:
 
     assert table_names == {
         "applications",
+        "application_decisions",
         "application_events",
         "application_snapshots",
         "companies",
@@ -103,6 +105,27 @@ def test_snapshots_and_events_have_database_level_constraints() -> None:
     assert "sequence > 0" in event_constraints
     assert "actor_type IN ('USER', 'SYSTEM')" in event_constraints
     assert ApplicationSnapshot.__table__.c.application_id.unique is True
+
+
+def test_application_decisions_have_database_level_domain_constraints() -> None:
+    constraints = {
+        str(constraint.sqltext)
+        for constraint in ApplicationDecision.__table_args__
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert "outcome IN ('APPROVED', 'CONDITIONAL_APPROVAL', 'REJECTED')" in constraints
+    assert "source IN ('AI', 'Fallback_Rules')" in constraints
+    assert "risk_score >= 0 AND risk_score <= 100" in constraints
+    assert "risk_level IN ('Low', 'Medium', 'High')" in constraints
+    assert "recommended_product IN ('Оборотный', 'Инвестиционный', 'Рефинансирование')" in constraints
+    unique_column_sets = {
+        tuple(constraint.columns.keys())
+        for constraint in ApplicationDecision.__table_args__
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("application_id",) in unique_column_sets
+    assert ("snapshot_id",) in unique_column_sets
 
 
 def test_companies_and_users_have_unique_business_identifiers() -> None:
