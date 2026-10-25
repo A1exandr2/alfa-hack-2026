@@ -31,7 +31,7 @@ CI включает дополнительные проверки Python/Checkov
 | Secret | `DEPLOY_SSH_KEY` | Приватный deploy SSH-ключ с доступом только к своему серверу |
 | Secret | `DEPLOY_KNOWN_HOSTS` | Проверенная запись SSH host key сервера, для нестандартного порта — с `[host]:port` |
 
-Runner использует существующие метки `[self-hosted, Linux, X64, credit]`. Для CI/CD нужны Docker Compose, SSH/SCP и Python 3. Никакой age identity в GitHub Secrets передавать не требуется: она остаётся на сервере. Host key проверяется строго, автоматического доверия результату ssh-keyscan нет. Не используйте непроверенную запись host key из недоверенного канала.
+Runner использует метки `[self-hosted, Linux, X64, credit, credit-server]` и запускается как systemd-служба `actions.runner.A1exandr2-credit.credit-server.service` под пользователем `credit-runner`. Для CI/CD нужны Docker Compose, SSH/SCP и Python 3. Никакой age identity в GitHub Secrets передавать не требуется: она остаётся на сервере. Host key проверяется строго, автоматического доверия результату ssh-keyscan нет. Не используйте непроверенную запись host key из недоверенного канала.
 
 На сервере установите Docker Compose, Python 3, SOPS и age; для GPU дополнительно NVIDIA Container Toolkit. Установите приватную age identity в `/etc/credit/age/keys.txt` отдельно от архива. Получите bootstrap-архив через `make server-package`, распакуйте его во временный каталог и запустите от root:
 

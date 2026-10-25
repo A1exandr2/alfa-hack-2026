@@ -15,12 +15,12 @@ concurrency:
 
 # Security и Docker integration tests запускаются автоматически.
 # Дополнительные проверки включаются через repository variables.
-# Все jobs выполняются на credit-local. PR из чужих fork не запускаются на локальном ПК.
+# Все jobs выполняются на серверном credit-server. PR из чужих fork не запускаются.
 jobs:
   gitleaks:
     name: Security / Gitleaks
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 10
     steps:
       - name: Checkout full history
@@ -39,7 +39,7 @@ jobs:
   semgrep:
     name: Security / Semgrep
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
   trivy-dependencies:
     name: Security / Trivy dependencies
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
   frontend-tests:
     name: Frontend / Syntax and DOM tests
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
   python-syntax:
     name: Python / Syntax
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
   deployment-tests:
     name: Deployment / SOPS, release rollback and image retention
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -116,7 +116,7 @@ jobs:
   python-lint:
     name: Lint / Python
     if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_PYTHON_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
   checkov:
     name: Security / Checkov Dockerfiles
     if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_DOCKER_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
     name: Docker / Build and Trivy scan
     if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_DOCKER_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [gitleaks, semgrep, trivy-dependencies, checkov]
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -172,7 +172,7 @@ jobs:
   docker-smoke:
     name: Docker / Integration tests
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, credit]
+    runs-on: [self-hosted, Linux, X64, credit, credit-server]
     timeout-minutes: 20
     env:
       INIT_ENV_ARGS: --fresh-local
