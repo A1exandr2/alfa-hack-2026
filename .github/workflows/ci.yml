@@ -45,6 +45,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Pull Semgrep image with bounded retries
+        run: |
+          for attempt in 1 2 3; do
+            if docker pull semgrep/semgrep:1.116.0; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 5
+          done
       - name: Static analysis
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src \

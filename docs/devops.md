@@ -88,7 +88,7 @@ Python syntax и Frontend syntax/DOM tests запускаются автомат
 
 Runner для Docker-задач должен иметь доступ к Docker: `docker info` должен работать от пользователя службы. Если пользователь еще не в группе docker, добавьте его через `sudo usermod -aG docker "$USER"`, затем перелогиньтесь и перезапустите службу. Группа docker дает административные возможности на хосте.
 
-Локальный runner имеет метку `credit`. Текущие CI/CD jobs дополнительно требуют `credit-server`, поэтому выполняются на серверном runner `credit-server`, установленном в `/opt/credit-runner` как systemd-служба под пользователем `credit-runner`. PR из чужих fork отключены на уровне условий jobs. Не запускайте на своем компьютере jobs из чужих PR.
+Локальный runner имеет метку `credit`. Текущие CI/CD jobs дополнительно требуют `credit-server`, поэтому выполняются на серверном runner `credit-server`, установленном в `/opt/credit-runner` как systemd-служба под пользователем `credit-runner`. На хосте должны быть установлены Git, Python 3, make, Docker Compose, SOPS и age (включая age-keygen); эти команды должны быть доступны в PATH службы. Deployment tests создают собственные временные ключи и не требуют production identity. PR из чужих fork отключены на уровне условий jobs. Не запускайте на своем компьютере jobs из чужих PR.
 
 Документация: https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners
 
