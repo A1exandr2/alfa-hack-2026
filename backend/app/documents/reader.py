@@ -64,7 +64,20 @@ def read_document(path):
         pages = []
         for number in range(1, int(match[1]) + 1):
             text = command(["pdftotext", "-layout", "-f", str(number), "-l", str(number), str(path), "-"])
+            fallback_used = False
             if len(re.sub(r"\s", "", text)) < 40:
+                # Poppler can omit text from malformed but still readable PDFs.
+                # Try a second parser before rendering the page for OCR.
+                try:
+                    from pypdf import PdfReader
+                    from pypdf.errors import PdfReadError
+                    fallback = PdfReader(str(path), strict=False).pages[number - 1].extract_text() or ""
+                    if fallback:
+                        text = fallback
+                        fallback_used = True
+                except (OSError, ValueError, PdfReadError):
+                    pass
+            if len(re.sub(r"\s", "", text)) < 40 and not fallback_used:
                 prefix = path.parent / "page"
                 command(["pdftoppm", "-f", str(number), "-l", str(number), "-r", "120", "-scale-to", "2600", "-singlefile", "-png", str(path), str(prefix)], timeout=20)
                 text = ocr(prefix.with_suffix(".png"), path.parent)

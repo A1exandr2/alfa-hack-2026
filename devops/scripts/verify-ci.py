@@ -12,7 +12,7 @@ def main():
     query=urlencode({'head_sha':sha,'branch':'main','status':'completed','per_page':50})
     url=f'https://api.github.com/repos/{repository}/actions/workflows/ci.yml/runs?{query}'
     req=Request(url,headers={'Authorization':'Bearer '+os.environ['GITHUB_TOKEN'],'Accept':'application/vnd.github+json'})
-    with urlopen(req,timeout=30) as response:runs=json.load(response)['workflow_runs']
+    with urlopen(req,timeout=30) as response:runs=json.load(response)['workflow_runs']  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- fixed api.github.com HTTPS endpoint; repository and SHA are validated.
     matching=[r for r in runs if r['head_sha']==sha and r['head_branch']=='main']
     if not matching or matching[0]['conclusion']!='success':raise SystemExit('The exact main commit has not passed CI; deployment refused')
     print('Exact main commit passed CI.')

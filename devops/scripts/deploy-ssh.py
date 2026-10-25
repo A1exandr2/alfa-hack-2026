@@ -23,21 +23,20 @@ def main():
         known.write_text(os.environ['DEPLOY_KNOWN_HOSTS'].rstrip()+'\n');known.chmod(0o600)
         options=['-i',str(key),'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes',
                  '-o','UserKnownHostsFile='+str(known),'-o','ConnectTimeout=20']
-        transport_env=os.environ.copy()
-        transport_env.pop('DEPLOY_SSH_KEY',None)
-        transport_env.pop('DEPLOY_KNOWN_HOSTS',None)
+        # Do not pass GitHub Actions secrets to ssh/scp child processes.
+        transport_env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'LANG':'C'}
         endpoint=user+'@'+host
         ssh=['ssh','-p',port,*options,endpoint]
-        remote=subprocess.check_output(ssh+['mktemp -d /tmp/credit-deploy.XXXXXXXX'],text=True,env=transport_env).strip()
+        remote=subprocess.check_output(ssh+['mktemp -d /tmp/credit-deploy.XXXXXXXX'],text=True,env=transport_env).strip()  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- fixed command; validated host/port and pinned host keys.
         if not re.fullmatch(r'/tmp/credit-deploy\.[A-Za-z0-9]+',remote):raise SystemExit('Invalid remote staging directory')
         scp_endpoint=user+'@'+('['+host+']' if ':' in host else host)
         try:
             subprocess.run(['scp','-P',port,*options,str(ROOT/'.local/deploy/credit-server.tar.gz'),
                             str(ROOT/'devops/scripts/deploy-release.py'),scp_endpoint+':'+remote+'/'],check=True,env=transport_env)
             command=([] if user=='root' else ['sudo','-n'])+['python3',remote+'/deploy-release.py','--archive',remote+'/credit-server.tar.gz','--sha',sha]
-            subprocess.run(ssh+[shlex.join(command)],check=True,env=transport_env)
+            subprocess.run(ssh+[shlex.join(command)],check=True,env=transport_env)  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- shlex.join quotes fixed args; staging path is regex-validated.
         finally:
-            subprocess.run(ssh+['rm -rf -- '+shlex.quote(remote)],check=False,env=transport_env)
+            subprocess.run(ssh+['rm -rf -- '+shlex.quote(remote)],check=False,env=transport_env)  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- path is regex-validated and shell-quoted.
 
 
 if __name__=='__main__':main()

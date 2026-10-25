@@ -1,16 +1,18 @@
-FROM python:3.12.12-slim-bookworm AS dependencies
+FROM python:3.12.15-alpine3.23 AS dependencies
 WORKDIR /build
 COPY backend/requirements.txt backend/requirements.lock ./
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt -c requirements.lock
 
-FROM python:3.12.12-slim-bookworm AS runtime
+FROM python:3.12.15-alpine3.23 AS runtime
 LABEL io.credit.project="credit" io.credit.component="backend"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
-RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home app
+RUN apk add --no-cache poppler-utils tesseract-ocr tesseract-ocr-data-rus tesseract-ocr-data-eng ttf-dejavu \
+    && mkdir -p /usr/share/fonts/truetype \
+    && ln -s /usr/share/fonts/dejavu /usr/share/fonts/truetype/dejavu
+RUN addgroup -S -g 10001 app && adduser -S -D -H -u 10001 -G app app
 COPY --from=dependencies /wheels /wheels
 COPY backend/requirements.txt backend/requirements.lock ./
 RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt -c requirements.lock && rm -rf /wheels

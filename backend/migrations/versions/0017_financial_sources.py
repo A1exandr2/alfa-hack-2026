@@ -32,12 +32,16 @@ def upgrade():
 def downgrade():
     # Refuse a lossy rollback instead of fabricating zeroes for unknown data.
     connection = op.get_bind()
-    for table, fields in [("financials", ("revenue_annual","profit_annual","expenses_annual","employees","current_debt")), ("credit_history", ("active_credits","closed_credits","overdue_count","overdue_amount"))]:
-        condition = " OR ".join(f"{field} IS NULL" for field in fields)
-        if connection.execute(sa.text(f"SELECT EXISTS (SELECT 1 FROM {table} WHERE {condition})")).scalar():
+    for table_name, fields in [("financials", ("revenue_annual","profit_annual","expenses_annual","employees","current_debt")), ("credit_history", ("active_credits","closed_credits","overdue_count","overdue_amount"))]:
+        # Table and column names come from these fixed migration constants; build
+        # a SQLAlchemy expression so identifiers are quoted by the dialect.
+        table = sa.table(table_name, *(sa.column(field) for field in fields))
+        unknown = sa.or_(*(table.c[field].is_(None) for field in fields))
+        unknown_rows = sa.select(sa.literal(1)).select_from(table).where(unknown).exists()
+        if connection.execute(sa.select(unknown_rows)).scalar():
             raise RuntimeError("Cannot downgrade while unknown financial values exist; restore a backup instead")
         for field in fields:
-            op.alter_column(table,field,nullable=False)
+            op.alter_column(table_name,field,nullable=False)
     op.drop_table("credit_history_consents")
     op.drop_column("credit_history","as_of")
     for table in ("financials", "credit_history"):

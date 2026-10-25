@@ -69,11 +69,13 @@ def main():
     args.output.mkdir(parents=True,exist_ok=True)
     config=args.output/'config';config.mkdir(exist_ok=True)
     cache=args.output/'cache';cache.mkdir(exist_ok=True)
-    env=os.environ.copy();env['XDG_CONFIG_HOME']=str(config.resolve());env['XDG_CACHE_HOME']=str(cache.resolve())
+    # Nuclei needs only its isolated XDG directories and the executable path.
+    env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),
+         'XDG_CONFIG_HOME':str(config.resolve()),'XDG_CACHE_HOME':str(cache.resolve())}
     # Only the pinned, signed official HTTP templates; no code/headless/OAST/fuzzing.
     common=[str((args.tools/'nuclei').resolve()),'-duc','-no-stdin','-no-color','-dut',
             '-t',str((args.tools/'templates/http').resolve()),'-type','http','-etags',EXCLUDE]
-    listed=subprocess.run(common+['-tl','-silent'],env=env,capture_output=True,text=True,timeout=180)
+    listed=subprocess.run(common+['-tl','-silent'],env=env,capture_output=True,text=True,timeout=180)  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- argv uses shell=False; binary and templates are locally pinned.
     if listed.returncode:raise SystemExit('Nuclei template loading failed')
     count=sum(1 for line in listed.stdout.splitlines() if line.strip().endswith(('.yaml','.yml')))
     if count<1000:raise SystemExit('Insufficient official HTTP templates loaded; refusing an empty scan')
@@ -84,7 +86,7 @@ def main():
                     '-rl','15','-c','4','-timeout','8','-retries','1']
     try:
         with (args.output/'scanner.log').open('w') as log:
-            try:scan=subprocess.run(command,env=env,stdout=subprocess.DEVNULL,stderr=log,timeout=1800)
+            try:scan=subprocess.run(command,env=env,stdout=subprocess.DEVNULL,stderr=log,timeout=1800)  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- argv uses shell=False; target_url() validates the HTTP(S) origin.
             except subprocess.TimeoutExpired:raise SystemExit('Nuclei scan timed out; result is incomplete') from None
         sanitize(raw,result)
     finally:raw.unlink(missing_ok=True)

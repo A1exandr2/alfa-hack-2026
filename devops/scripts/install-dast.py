@@ -13,7 +13,10 @@ ROOT=Path(__file__).resolve().parents[2]
 
 
 def download(item):
-    with urllib.request.urlopen(item['url'],timeout=90) as response:data=response.read(250_000_000)
+    url=item['url']
+    if not url.startswith(('https://github.com/','https://codeload.github.com/')):
+        raise SystemExit('DAST downloads must use official GitHub HTTPS URLs')
+    with urllib.request.urlopen(url,timeout=90) as response:data=response.read(250_000_000)  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- reviewed lock URL; HTTPS host allowlist and SHA-256 verification.
     if hashlib.sha256(data).hexdigest()!=item['sha256']:raise SystemExit('DAST download checksum mismatch')
     return data
 
