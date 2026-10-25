@@ -306,7 +306,7 @@ function linkCompany() {
       "Познакомимся с вашим бизнесом.",
       "Привяжите компанию по ИНН, чтобы продолжить работу с заявками.",
     ) +
-    `<section class="card link-card empty"><div class="symbol">▦</div><h2>Всё начинается с вашей компании.</h2><p>Данные организации и финансовые показатели<br>появятся после привязки.</p><form data-form="link"><div data-error role="alert"></div><label class="field">ИНН компании<input name="inn" inputmode="numeric" pattern="[0-9]{10}([0-9]{2})?" minlength="10" maxlength="12" placeholder="10 или 12 цифр" required></label><button class="primary wide">Привязать компанию ↗</button></form><p class="hint" style="margin-top:25px">Сведения загружаются из демонстрационного источника.</p></section>`
+    `<section class="card link-card empty"><div class="symbol">▦</div><h2>Всё начинается с вашей компании.</h2><p>Данные организации и финансовые показатели<br>появятся после привязки.</p><form data-form="link"><div data-error role="alert"></div><label class="field">ИНН компании<input name="inn" inputmode="numeric" pattern="[0-9]{10}([0-9]{2})?" minlength="10" maxlength="12" placeholder="10 или 12 цифр" required></label><button class="primary wide">Привязать компанию ↗</button></form><p class="hint" style="margin-top:25px">${state.registry?.configured ? "Реквизиты компании загружаются из DaData. Финансовые показатели добавляются отдельно." : "Сведения загружаются из демонстрационного источника."}</p></section>`
   );
 }
 const productById = (id) => state.products.find((p) => p.id === id);

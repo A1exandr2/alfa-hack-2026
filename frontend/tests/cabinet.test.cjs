@@ -760,6 +760,27 @@ test("editing a term does not create premature validation errors and clears old 
   await until(() => root.querySelector("[data-quote-ready=true]"));
   dom.window.close();
 });
+for (const configured of [true, false]) {
+  test(`company onboarding shows the actual registry source (${configured})`, async () => {
+    const { dom, root } = setup({
+      hash: "/company",
+      overrides: {
+        "/company": undefined,
+        "/company/registry-status": { configured, provider: configured ? "DaData" : null },
+      },
+    });
+    await until(() => root.querySelector('[data-form="link"]'));
+    const hint = root.querySelector(".link-card .hint").textContent;
+    if (configured) {
+      assert.match(hint, /DaData/);
+      assert.doesNotMatch(hint, /демонстрационного/);
+    } else {
+      assert.match(hint, /демонстрационного/);
+    }
+    dom.window.close();
+  });
+}
+
 test("unconfigured registry explains the source without sending a failing refresh", async () => {
   const { dom, root, calls } = setup({
     hash: "/company",
