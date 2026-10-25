@@ -7,6 +7,7 @@ help:
 	@echo 'make up / up-gpu — общий стек с Qwen (CPU / NVIDIA GPU)'
 	@echo 'make up-core  — API без Ollama, рекомендации по запасным правилам'
 	@echo 'make check-ml — сквозная проверка настоящего ответа LLM'
+	@echo 'make local-ai-up / local-ai-status — локальная GPU Ollama и SSH-туннель к VPS'
 	@echo 'make down     — остановить стек, сохранив базу'
 	@echo 'make status   — контейнеры, CPU/RAM, дисковое пространство'
 	@echo 'make logs [SERVICE=backend] — следить за логами'
@@ -64,6 +65,16 @@ gitleaks:
 	docker run --rm -v "$(CURDIR):/repo:ro" zricethezav/gitleaks:v8.18.2 detect --source=/repo --redact --verbose
 
 .PHONY: up-core up-gpu model-pull check-ml
+
+.PHONY: local-ai-up local-ai-status local-ai-stop
+local-ai-up: config
+	$(GPU_COMPOSE) -f docker-compose.local-ai.yml --profile llm up -d --no-deps ollama
+	systemctl --user start credit-local-ai-tunnel.service
+local-ai-status:
+	systemctl --user status credit-local-ai-tunnel.service --no-pager
+	$(COMPOSE) exec -T ollama ollama ps
+local-ai-stop:
+	systemctl --user stop credit-local-ai-tunnel.service
 
 .PHONY: secrets-key secrets-encrypt secrets-decrypt secrets-check
 secrets-key:

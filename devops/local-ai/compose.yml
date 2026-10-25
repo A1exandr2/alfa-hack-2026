@@ -1,0 +1,31 @@
+name: credit-ai-bridge
+services:
+  bridge:
+    image: python:3.12.15-alpine3.23@sha256:3d0ca66b723a0ff2a7a6e424cc2d01443e1b7c75ffcc110145f75d0f4daf6d63
+    user: '10002:10002'
+    init: true
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 64m
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+    command: [python, /proxy.py]
+    volumes:
+      - ./proxy.py:/proxy.py:ro
+      - /var/lib/credit-llm/socket:/bridge:ro
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',11434),3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      application:
+        aliases: [ollama]
+networks:
+  application:
+    external: true
+    name: credit_internal

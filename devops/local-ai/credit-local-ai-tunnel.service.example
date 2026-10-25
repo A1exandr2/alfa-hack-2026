@@ -1,0 +1,13 @@
+[Unit]
+Description=Private reverse SSH tunnel for local Ollama
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -p 15945 -i @KEY@ -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=@KNOWN_HOSTS@ -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -R /var/lib/credit-llm/socket/ollama.sock:127.0.0.1:11434 credit-llm-tunnel@176.123.165.51
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

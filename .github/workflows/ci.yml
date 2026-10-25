@@ -123,6 +123,7 @@ jobs:
           python3 devops/scripts/test_secrets.py
           python3 devops/scripts/test_server_runtime.py
           python3 devops/scripts/test_cd.py
+          python3 devops/local-ai/test_proxy.py
 
   python-lint:
     name: Lint / Python

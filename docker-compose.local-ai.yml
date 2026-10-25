@@ -1,0 +1,5 @@
+# Publish the existing local model only to this computer's loopback interface.
+services:
+  ollama:
+    ports:
+      - '127.0.0.1:11434:11434'
