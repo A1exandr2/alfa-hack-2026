@@ -14,7 +14,7 @@ def sanitize_user_query(query: str) -> str:
     cleaned = query
     for pattern in DANGEROUS_PATTERNS:
         cleaned = re.sub(pattern, "[УДАЛЕНО]", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()[:500]
+    return cleaned.strip()[:2000]
 
 
 def enrich_data_for_llm(

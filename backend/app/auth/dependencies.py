@@ -37,7 +37,7 @@ async def get_current_user(
         raise unauthorized from error
 
     user = await session.get(User, user_id)
-    if user is None:
+    if user is None or not user.is_active:
         raise unauthorized
     return user
 
@@ -45,9 +45,14 @@ async def get_current_user(
 async def get_current_reviewer(
     user: User = Depends(get_current_user),
 ) -> User:
-    if user.role != "REVIEWER":
+    if user.role not in {"REVIEWER", "ADMIN"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Reviewer role required",
         )
+    return user
+
+async def get_current_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Administrator role required")
     return user

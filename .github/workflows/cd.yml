@@ -1,0 +1,128 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: credit-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy / Production
+    if: >-
+      vars.ENABLE_CD == 'true' &&
+      ((github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+       (github.event_name == 'workflow_dispatch' && github.ref_name == 'main'))
+    environment: production
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 45
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: 1. Checkout tested main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: 2. Record immutable release
+        id: release
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify exact commit passed CI (also for manual runs)
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 devops/scripts/verify-ci.py
+      - name: 3. Validate deployment inputs
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          required = ['DEPLOY_HOST', 'DEPLOY_USER', 'PRODUCTION_URL', 'DEPLOY_SSH_KEY', 'DEPLOY_KNOWN_HOSTS']
+          if any(not os.environ.get(key) for key in required):
+              raise SystemExit('Missing production deployment configuration')
+          target = urlsplit(os.environ['PRODUCTION_URL'])
+          if target.scheme != 'https' or not target.hostname or target.username or target.password or target.query or target.fragment or target.path not in {'', '/'}:
+              raise SystemExit('PRODUCTION_URL must be the HTTPS origin owned by this project')
+          PY
+      - name: 4. Check deployment script syntax
+        run: python3 -m compileall -q devops/scripts
+      - name: 5. Package code and encrypted configuration
+        run: make server-package
+      - name: 6. Transfer and activate release over pinned-host SSH
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: python3 devops/scripts/deploy-ssh.py
+      - name: 7. Verify public HTTPS readiness
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os
+          spec = importlib.util.spec_from_file_location('dast', 'devops/scripts/dast-scan.py')
+          dast = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(dast)
+          dast.ready(dast.target_url(os.environ['PRODUCTION_URL']))
+          PY
+      - name: 8. Record deployment summary
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          printf 'Deployed commit: `%s`\n\nOld project images are cleaned on the server; current and rollback versions are retained.\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: 9. Preserve release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.release.outputs.sha }}
+          path: .local/deploy/credit-server.tar.gz.sha256
+          retention-days: 14
+
+  dast:
+    name: 10. DAST (Nuclei Scan)
+    needs: deploy
+    environment: production
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.deploy.outputs.sha }}
+          persist-credentials: false
+      - name: Install pinned Nuclei and official templates
+        run: python3 devops/scripts/install-dast.py
+      - name: Scan deployed HTTPS site and fail on High/Critical findings
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: python3 devops/scripts/dast-scan.py
+      - name: Preserve DAST findings and scanner log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-${{ needs.deploy.outputs.sha }}
+          path: |
+            .local/dast-report/findings.jsonl
+            .local/dast-report/summary.json
+            .local/dast-report/scanner.log
+          if-no-files-found: warn
+          retention-days: 14

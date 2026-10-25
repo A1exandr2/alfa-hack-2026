@@ -129,7 +129,8 @@ async def test_patch_financials_updates_only_submitted_fields() -> None:
         assert updated["expenses_annual"] == 10_400_000.0
         assert updated["employees"] == 9
         assert updated["current_debt"] == 800_000.0
-        assert updated["source"] == "USER_VERIFIED"
+        assert updated["source"] == "MIXED"
+        assert updated["field_sources"]["revenue_annual"]["source"] == "USER_INPUT"
         assert updated["updated_at"] != initial.json()["updated_at"]
     finally:
         async with session_factory() as session:

@@ -1,0 +1,12 @@
+{
+  "name": "credit-cabinet-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node tests/cabinet.test.cjs",
+    "check": "node --check app.js"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.3"
+  }
+}

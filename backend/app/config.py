@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60
+    admin_login: str = "Admin"
+    admin_email: str = ""
     database_url: str
 
     model_config = SettingsConfigDict(

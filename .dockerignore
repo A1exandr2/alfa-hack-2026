@@ -19,3 +19,16 @@ ml/artifacts
 
 # Generated synthetic datasets are not application runtime files.
 data/*.csv
+
+# Local previews, dependencies and database backups
+.local
+
+# Deployment ciphertext and SOPS config are not runtime dependencies
+secrets
+.sops.yaml
+*.agekey
+age-keys.txt
+keys.txt
+
+# Local cloud credentials are never project artifacts
+.aws

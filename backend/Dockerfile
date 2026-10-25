@@ -4,10 +4,12 @@ COPY backend/requirements.txt backend/requirements.lock ./
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt -c requirements.lock
 
 FROM python:3.12.12-slim-bookworm AS runtime
+LABEL io.credit.project="credit" io.credit.component="backend"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home app
 COPY --from=dependencies /wheels /wheels
 COPY backend/requirements.txt backend/requirements.lock ./

@@ -8,6 +8,8 @@ from starlette.concurrency import run_in_threadpool
 
 from ml.facade import score_and_explain
 
+from app.company.credit_access import authorized_provider, unknown_history
+from app.company.data_quality import MANUAL_SOURCES, FINANCIAL_FIELDS, CREDIT_FIELDS, provenance, missing_fields, manual_fields
 from app.applications.schemas import ApplicationRiskAssessment
 from app.applications.service import (
     ApplicationDecisionNotFoundError,
@@ -53,6 +55,8 @@ def _build_scoring_input(
 ]:
     registration_date = company.registration_date
     today = date.today()
+    if missing_fields(company, financials, credit_history):
+        raise ApplicationDataMissingError()
     revenue = float(financials.revenue_annual)
     if registration_date is None or registration_date > today:
         raise ApplicationDataMissingError()
@@ -74,7 +78,7 @@ def _build_scoring_input(
     }
     product_features: dict[str, str | float | int] = {
         "name": product.name,
-        "interest_rate": float(product.interest_rate),
+        "interest_rate": float((getattr(application, "pricing", None) or {}).get("annual_rate", product.interest_rate)),
         "min_amount": float(product.min_amount),
         "max_amount": float(product.max_amount),
         "min_term_months": product.min_term_months,
@@ -85,7 +89,7 @@ def _build_scoring_input(
         financial_features,
         credit_features,
         float(application.requested_amount),
-        application.purpose,
+        application.purpose + ("\nДополнительные сведения: " + getattr(application, "additional_info", "") if getattr(application, "additional_info", "") else ""),
         application.term_months,
         product_features,
     )
@@ -148,6 +152,8 @@ async def _get_or_fetch_financials(
             employees=data.employees,
             current_debt=data.current_debt,
             source=data.source,
+            report_year=getattr(data, "report_year", None),
+            field_sources=provenance(data, FINANCIAL_FIELDS),
         ),
         True,
     )
@@ -175,6 +181,8 @@ async def _get_or_fetch_credit_history(
             overdue_count=data.overdue_count,
             overdue_amount=data.overdue_amount,
             source=data.source,
+            field_sources=provenance(data, CREDIT_FIELDS),
+            as_of=data.as_of,
         ),
         True,
     )
@@ -195,6 +203,9 @@ def _build_snapshot_payload(
             "requested_amount": str(application.requested_amount),
             "term_months": application.term_months,
             "purpose": application.purpose,
+            "additional_info": application.additional_info,
+            "purpose_category": application.purpose_category,
+            "pricing": application.pricing,
         },
         "company": {
             "id": str(company.id),
@@ -212,21 +223,26 @@ def _build_snapshot_payload(
             "data_source": company.data_source,
         },
         "financials": {
-            "revenue_annual": str(financials.revenue_annual),
-            "profit_annual": str(financials.profit_annual),
-            "expenses_annual": str(financials.expenses_annual),
+            "revenue_annual": str(financials.revenue_annual) if financials.revenue_annual is not None else None,
+            "profit_annual": str(financials.profit_annual) if financials.profit_annual is not None else None,
+            "expenses_annual": str(financials.expenses_annual) if financials.expenses_annual is not None else None,
             "employees": financials.employees,
-            "current_debt": str(financials.current_debt),
+            "current_debt": str(financials.current_debt) if financials.current_debt is not None else None,
             "updated_at": financials.updated_at.isoformat(),
             "source": financials.source,
+            "report_year": financials.report_year,
+            "field_sources": financials.field_sources,
         },
         "credit_history": {
             "active_credits": credit_history.active_credits,
             "closed_credits": credit_history.closed_credits,
             "overdue_count": credit_history.overdue_count,
-            "overdue_amount": str(credit_history.overdue_amount),
-            "updated_at": credit_history.updated_at.isoformat(),
+            "overdue_amount": str(credit_history.overdue_amount) if credit_history.overdue_amount is not None else None,
+            "updated_at": credit_history.updated_at.isoformat() if credit_history.updated_at else None,
             "source": credit_history.source,
+            "as_of": credit_history.as_of.isoformat() if credit_history.as_of else None,
+            "field_sources": credit_history.field_sources,
+            "report_year": credit_history.report_year,
         },
         "credit_product": {
             "id": str(product.id),
@@ -318,27 +334,23 @@ async def submit_application(
     product = await session.get(CreditProduct, application.product_id)
     if company is None or product is None or not product.is_active:
         raise ApplicationDataMissingError()
-    if company.registration_date is None or company.registration_date > date.today():
-        raise ApplicationDataMissingError()
     _validate_terms(product, application.requested_amount, application.term_months)
 
     financials, new_financials = await _get_or_fetch_financials(
         session, company, financial_provider
     )
-    credit_history, new_credit_history = await _get_or_fetch_credit_history(
-        session, company, credit_history_provider
-    )
+    credit_history_provider = await authorized_provider(session,user_id,company.id,credit_history_provider)
+    if credit_history_provider is None:
+        credit_history, new_credit_history = unknown_history(company.id), False
+    else:
+        credit_history, new_credit_history = await _get_or_fetch_credit_history(session, company, credit_history_provider)
     if new_financials:
         session.add(financials)
     if new_credit_history:
         session.add(credit_history)
     await session.flush()
 
-    required_fields = (
-        ["financials.revenue_annual"]
-        if financials.revenue_annual <= 0
-        else []
-    )
+    required_fields = missing_fields(company, financials, credit_history)
     incomplete_payload = _build_snapshot_payload(
         application,
         company,
@@ -414,6 +426,17 @@ async def submit_application(
     risk_assessment = await _score_application(
         application, company, product, financials, credit_history
     )
+    # Self-reported data can inform a review, but can never authorize automatic approval.
+    unverified = (financials.source in MANUAL_SOURCES or credit_history.source in MANUAL_SOURCES or manual_fields(financials, FINANCIAL_FIELDS) or manual_fields(credit_history, CREDIT_FIELDS)
+                  or (company.data_source != "DEMO" and (financials.source == "DEMO" or credit_history.source == "DEMO")))
+    if unverified and risk_assessment.decision == "APPROVED":
+        payload = risk_assessment.model_dump()
+        payload["decision"] = "CONDITIONAL_APPROVAL"
+        payload["ai_advice"]["data"]["decision"] = "CONDITIONAL_APPROVAL"
+        payload["ai_advice"]["data"]["conditions"] = ["Проверить отчётность и кредитную историю: часть данных введена пользователем и не подтверждена источником."]
+        payload["ai_advice"]["data"]["explanation"] = "Заявка передана на ручную проверку. Для решения необходимо подтвердить предоставленные сведения."
+        payload["ai_advice"]["data"]["next_step"] = "Подготовьте подтверждающие документы для проверки специалистом."
+        risk_assessment = ApplicationRiskAssessment.model_validate(payload)
     snapshot_payload = _build_snapshot_payload(
         application,
         company,

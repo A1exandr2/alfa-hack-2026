@@ -41,6 +41,10 @@ class Company(Base):
         String(32), nullable=False, default="DEMO"
     )
 
+    full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kpp: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     users: Mapped[list["User"]] = relationship(back_populates="company")
     financials: Mapped["Financials"] = relationship(
         back_populates="company", uselist=False
@@ -53,7 +57,7 @@ class Company(Base):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('USER', 'REVIEWER')", name="ck_users_role"),
+        CheckConstraint("role IN ('USER', 'REVIEWER', 'ADMIN')", name="ck_users_role"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -65,6 +69,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, default="USER", server_default="USER"
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     company_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
     )
@@ -84,18 +89,18 @@ class Financials(Base):
     company_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), primary_key=True
     )
-    revenue_annual: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2), nullable=False, default=0
+    revenue_annual: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
-    profit_annual: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2), nullable=False, default=0
+    profit_annual: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
-    expenses_annual: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2), nullable=False, default=0
+    expenses_annual: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
-    employees: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    current_debt: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2), nullable=False, default=0
+    employees: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_debt: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -104,8 +109,11 @@ class Financials(Base):
         onupdate=func.now(),
     )
     source: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="USER_VERIFIED"
+        String(32), nullable=False, default="USER_INPUT"
     )
+
+    report_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     company: Mapped[Company] = relationship(back_populates="financials")
 
@@ -130,16 +138,20 @@ class CreditHistory(Base):
     company_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), primary_key=True
     )
-    active_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    closed_credits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    overdue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    overdue_amount: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2), nullable=False, default=0
+    active_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    closed_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overdue_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overdue_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    source: Mapped[str] = mapped_column(String(32), nullable=False, default="DEMO")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="UNAVAILABLE")
+    report_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+
+    as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     company: Mapped[Company] = relationship(back_populates="credit_history")
 
@@ -193,6 +205,9 @@ class Application(Base):
     requested_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     term_months: Mapped[int] = mapped_column(Integer, nullable=False)
     purpose: Mapped[str] = mapped_column(String(500), nullable=False)
+    additional_info: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
+    purpose_category: Mapped[str] = mapped_column(String(32), nullable=False, default="other", server_default="other")
+    pricing: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="DRAFT", server_default="DRAFT"
     )
@@ -369,3 +384,39 @@ class ApplicationEvent(Base):
     details: Mapped[dict[str, object]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
+
+
+class CreditHistoryConsent(Base):
+    __tablename__ = "credit_history_consents"
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    company_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    text_version: Mapped[str] = mapped_column(String(32), nullable=False, default="credit-report-v1")
+
+
+class DocumentImport(Base):
+    __tablename__ = "document_imports"
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    company_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    extracted: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    accepted_values: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AdminAudit(Base):
+    __tablename__ = "admin_audit"
+    __table_args__ = (Index("ix_admin_audit_created_at", "created_at"),)
+    id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
+    actor_user_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -17,6 +17,9 @@ def request(path, payload=None, token=None):
         response.raise_for_status()
         return response.json() if 'application/json' in response.headers.get('Content-Type', '') else response.content
 
+assert b'id="app"' in request('/')
+assert request('/app.js')
+assert request('/styles.css')
 assert request('/api/v1/ready')['database'] == 'ok'
 assert request('/api/v1/health')['status'] == 'ok'
 assert request('/docs')

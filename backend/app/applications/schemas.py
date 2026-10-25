@@ -9,12 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 class ApplicationCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    product_id: UUID
+    product_id: UUID | None = None
+    purpose_category: Literal["working_capital", "investment", "urgent", "other"] = "other"
     requested_amount: Decimal = Field(
         gt=Decimal("0"), max_digits=15, decimal_places=2
     )
     term_months: int = Field(gt=0)
     purpose: str = Field(min_length=1, max_length=500)
+    additional_info: str = Field(default="", max_length=1000)
 
     @field_validator("purpose")
     @classmethod
@@ -34,6 +36,9 @@ class ApplicationResponse(BaseModel):
     requested_amount: Decimal
     term_months: int
     purpose: str
+    additional_info: str = ""
+    purpose_category: str = "other"
+    pricing: dict[str, object] | None = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -43,6 +48,7 @@ class ApplicationUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     product_id: UUID | None = None
+    purpose_category: Literal["working_capital", "investment", "urgent", "other"] | None = None
     requested_amount: Decimal | None = Field(
         default=None,
         gt=Decimal("0"),
@@ -51,6 +57,7 @@ class ApplicationUpdateRequest(BaseModel):
     )
     term_months: int | None = Field(default=None, gt=0)
     purpose: str | None = Field(default=None, min_length=1, max_length=500)
+    additional_info: str | None = Field(default=None, max_length=1000)
 
     @field_validator("purpose")
     @classmethod
@@ -177,3 +184,9 @@ class ApplicationReviewResponse(BaseModel):
 class ApplicationSubmissionResponse(ApplicationResponse):
     decision: ApplicationDecisionResponse | None = None
     required_fields: list[str] = Field(default_factory=list)
+
+class ApplicationQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requested_amount: Decimal = Field(gt=Decimal("0"), max_digits=15, decimal_places=2)
+    term_months: int = Field(gt=0, le=600)
+    purpose_category: Literal["working_capital", "investment", "urgent", "other"] = "other"

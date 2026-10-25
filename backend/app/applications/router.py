@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.applications.schemas import (
     ApplicationCreateRequest,
+    ApplicationQuoteRequest,
     ApplicationDecisionResponse,
     ApplicationEventResponse,
     ApplicationReviewRequest,
@@ -18,6 +19,7 @@ from app.applications.schemas import (
 from app.applications.service import (
     ApplicationError,
     create_application,
+    quote_application,
     get_application,
     list_applications,
     update_application,
@@ -46,6 +48,19 @@ router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
 
 def _raise_http_error(error: ApplicationError) -> NoReturn:
     raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+
+@router.post("/quote")
+async def preview_application_quote(
+    payload: ApplicationQuoteRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    try:
+        _, pricing = await quote_application(session, payload.requested_amount, payload.term_months, payload.purpose_category)
+    except ApplicationError as error:
+        _raise_http_error(error)
+    return pricing
 
 
 @router.post(

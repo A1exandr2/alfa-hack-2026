@@ -68,6 +68,20 @@ jobs:
             --skip-dirs devops/runner --no-progress \
             --severity HIGH,CRITICAL --exit-code 1 .
 
+  frontend-tests:
+    name: Frontend / Syntax and DOM tests
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test frontend
+        run: |
+          docker run --rm -v "$PWD/frontend:/source:ro" node:22-alpine \
+            sh -ec 'cp -R /source /tmp/frontend; cd /tmp/frontend; npm ci --ignore-scripts --no-audit --no-fund; npm run check; npm test'
+
   python-syntax:
     name: Python / Syntax
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -84,9 +98,24 @@ jobs:
             python:3.12.12-slim-bookworm \
             python -m compileall -q backend ml data devops/scripts
 
+  deployment-tests:
+    name: Deployment / SOPS, release rollback and image retention
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, credit]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test deployment helpers without production secrets
+        run: |
+          python3 devops/scripts/test_secrets.py
+          python3 devops/scripts/test_server_runtime.py
+          python3 devops/scripts/test_cd.py
+
   python-lint:
     name: Lint / Python
-    if: vars.ENABLE_PYTHON_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_PYTHON_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 10
     steps:
@@ -100,7 +129,7 @@ jobs:
 
   checkov:
     name: Security / Checkov Dockerfiles
-    if: vars.ENABLE_DOCKER_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_DOCKER_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 15
     steps:
@@ -115,7 +144,7 @@ jobs:
 
   docker-build-and-scan:
     name: Docker / Build and Trivy scan
-    if: vars.ENABLE_DOCKER_CI == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: (github.ref_name == 'main' || github.base_ref == 'main' || vars.ENABLE_DOCKER_CI == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     needs: [gitleaks, semgrep, trivy-dependencies, checkov]
     runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 30
@@ -138,7 +167,7 @@ jobs:
             --severity HIGH,CRITICAL --exit-code 1 \
             "credit-${{ matrix.component }}:${{ github.sha }}"
 
-# Deploy добавим, когда появятся приложение и команда развертывания.
+# CD is defined in cd.yml and starts only after this workflow succeeds on main.
 
   docker-smoke:
     name: Docker / Integration tests
@@ -146,6 +175,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, credit]
     timeout-minutes: 20
     env:
+      INIT_ENV_ARGS: --fresh-local
       COMPOSE_PROJECT_NAME: credit-ci-${{ github.run_id }}-${{ github.run_attempt }}
       APP_PORT: "0"
       POSTGRES_PORT: "0"

@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.auth.dependencies import get_current_user
 from app.auth.schemas import (
     AuthResponse,
@@ -64,8 +65,13 @@ async def login(
     payload: LoginRequest,
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthResponse:
-    user = await session.scalar(select(User).where(User.email == payload.email))
-    if user is None or not verify_password(payload.password, user.password_hash):
+    settings = get_settings()
+    if settings.admin_email and payload.email == settings.admin_login.strip().lower():
+        user = await session.scalar(select(User).where(
+            User.email == settings.admin_email.strip().lower(), User.role == "ADMIN"))
+    else:
+        user = await session.scalar(select(User).where(User.email == payload.email))
+    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",

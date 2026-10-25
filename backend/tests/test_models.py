@@ -19,6 +19,7 @@ def test_credit_domain_tables_are_registered() -> None:
     table_names = set(Base.metadata.tables)
 
     assert table_names == {
+        "admin_audit",
         "applications",
         "application_decisions",
         "application_events",
@@ -26,6 +27,8 @@ def test_credit_domain_tables_are_registered() -> None:
         "application_snapshots",
         "companies",
         "credit_history",
+        "credit_history_consents",
+        "document_imports",
         "credit_products",
         "financials",
         "users",

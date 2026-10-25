@@ -62,3 +62,38 @@ async def test_user_can_link_company_and_read_it() -> None:
                     await session.delete(company)
             await session.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unlink_removes_only_user_link_and_allows_another_company() -> None:
+    email = f"unlink-{uuid4()}@example.com"
+    ids = []
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            auth = await client.post('/api/v1/auth/register', json={'email':email,'password':'StrongPass123!','full_name':'Test'})
+            headers={'Authorization':f"Bearer {auth.json()['access_token']}"}
+            assert (await client.delete('/api/v1/company')).status_code == 401
+            for _ in range(2):
+                linked = await client.post('/api/v1/company/link', headers=headers,json={'inn':str(uuid4().int)[:10]})
+                assert linked.status_code == 200
+                ids.append(linked.json()['id'])
+                assert (await client.delete('/api/v1/company',headers=headers)).status_code == 204
+                assert (await client.get('/api/v1/company',headers=headers)).status_code == 404
+                assert (await client.get('/api/v1/auth/me',headers=headers)).json()['company_id'] is None
+            async with session_factory() as session:
+                from uuid import UUID
+                for company_id in ids:
+                    assert await session.get(Company,UUID(company_id)) is not None
+    finally:
+        async with session_factory() as session:
+            user=await session.scalar(select(User).where(User.email==email))
+            if user is not None:
+                await session.delete(user)
+                await session.flush()
+            from uuid import UUID
+            for company_id in ids:
+                record=await session.get(Company,UUID(company_id))
+                if record is not None:
+                    await session.delete(record)
+            await session.commit()
+        await engine.dispose()

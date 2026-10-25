@@ -33,7 +33,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     full_name: str
-    role: Literal["USER", "REVIEWER"]
+    role: Literal["USER", "REVIEWER", "ADMIN"]
     company_id: UUID | None
 
 

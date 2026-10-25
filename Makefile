@@ -13,8 +13,10 @@ help:
 	@echo 'make test     — тесты с отдельной временной PostgreSQL'
 	@echo 'make check    — проверить API, Swagger, регистрацию и login'
 	@echo 'make build / config / restart / migrate / shell / db-shell / gitleaks'
+	@echo 'make secret-set NAME=VARIABLE — скрытый ввод и автоматическое шифрование'
+	@echo 'make server-up / server-check / server-status — запуск из SOPS без .env'
 init:
-	@python3 devops/scripts/init-env.py
+	@python3 devops/scripts/init-env.py $(INIT_ENV_ARGS)
 config: init
 	@$(COMPOSE) config --quiet
 build: config
@@ -62,3 +64,56 @@ gitleaks:
 	docker run --rm -v "$(CURDIR):/repo:ro" zricethezav/gitleaks:v8.18.2 detect --source=/repo --redact --verbose
 
 .PHONY: up-core up-gpu model-pull check-ml
+
+.PHONY: secrets-key secrets-encrypt secrets-decrypt secrets-check
+secrets-key:
+	python3 devops/scripts/sops-env.py key
+secrets-encrypt:
+	python3 devops/scripts/sops-env.py encrypt
+secrets-decrypt:
+	python3 devops/scripts/sops-env.py decrypt
+secrets-check:
+	python3 devops/scripts/sops-env.py check
+
+.PHONY: admin-bootstrap
+admin-bootstrap: config
+	$(COMPOSE) --profile admin run --rm admin-bootstrap
+
+# NAME is passed as environment data, never interpolated into shell code.
+export SECRET_NAME = $(NAME)
+.PHONY: secret-set secret-set-stdin server-check server-up server-stop server-status server-logs
+secret-set:
+	@python3 devops/scripts/sops-env.py set
+secret-set-stdin:
+	@python3 devops/scripts/sops-env.py set --stdin
+server-check:
+	@python3 devops/scripts/server-runtime.py check
+server-up:
+	@python3 devops/scripts/server-runtime.py up
+server-stop:
+	@python3 devops/scripts/server-runtime.py stop
+server-status:
+	@python3 devops/scripts/server-runtime.py status
+server-logs:
+	@python3 devops/scripts/server-runtime.py logs
+
+.PHONY: server-package
+server-package:
+	@python3 devops/scripts/package-server.py
+
+.PHONY: secret-add
+secret-add: secret-set
+
+.PHONY: dast-install dast-scan images-cleanup
+# PRODUCTION_URL is read from the environment, not interpolated into shell source.
+export PRODUCTION_URL
+dast-install:
+	@python3 devops/scripts/install-dast.py
+dast-scan:
+	@python3 devops/scripts/dast-scan.py
+images-cleanup:
+	@python3 devops/scripts/cleanup-images.py --apply
+
+.PHONY: server-install
+server-install:
+	@python3 devops/scripts/install-server.py

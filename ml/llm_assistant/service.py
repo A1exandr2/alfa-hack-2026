@@ -38,7 +38,7 @@ def get_ai_advice(
             ],
             format=CreditAdvice.model_json_schema(), 
             think=False, # Отключаем reasoning-режим
-            options={"temperature": 0.1, "num_predict": 300, "num_ctx": 4096},
+            options={"temperature": 0.1, "num_predict": 700, "num_ctx": 4096},
         )
         ai_response = CreditAdvice.model_validate_json(
             response["message"]["content"]

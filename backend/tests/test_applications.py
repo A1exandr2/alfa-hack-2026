@@ -68,6 +68,7 @@ async def test_user_can_create_application_draft() -> None:
                     "requested_amount": requested_amount,
                     "term_months": 12,
                     "purpose": "Пополнение оборотных средств",
+                    "additional_info": "Собственные средства 300000 рублей",
                 },
             )
 
@@ -78,6 +79,7 @@ async def test_user_can_create_application_draft() -> None:
         assert Decimal(body["requested_amount"]) == Decimal(requested_amount)
         assert body["term_months"] == 12
         assert body["purpose"] == "Пополнение оборотных средств"
+        assert body["additional_info"] == "Собственные средства 300000 рублей"
         assert body["status"] == "DRAFT"
         assert body["created_at"]
         assert body["updated_at"]
@@ -743,13 +745,13 @@ async def test_need_more_data_can_be_corrected_and_resubmitted(monkeypatch) -> N
             )
 
         assert resubmitted.status_code == 200, resubmitted.text
-        assert resubmitted.json()["status"] == "DECISION"
+        assert resubmitted.json()["status"] == "MANUAL_REVIEW"
         assert resubmitted.json()["required_fields"] == []
-        assert resubmitted.json()["decision"]["outcome"] == "APPROVED"
+        assert resubmitted.json()["decision"]["outcome"] == "CONDITIONAL_APPROVAL"
         assert len(scoring_calls) == 1
         assert history.status_code == 200
         assert "NEED_MORE_DATA" in [event["to_status"] for event in history.json()]
-        assert history.json()[-1]["to_status"] == "DECISION"
+        assert history.json()[-1]["to_status"] == "MANUAL_REVIEW"
 
         async with session_factory() as session:
             snapshots = list(
@@ -773,7 +775,7 @@ async def test_need_more_data_can_be_corrected_and_resubmitted(monkeypatch) -> N
             "Fallback_Rules"
         )
         assert saved_application is not None
-        assert saved_application.status == "DECISION"
+        assert saved_application.status == "MANUAL_REVIEW"
         assert saved_financials is not None
         assert saved_financials.revenue_annual == Decimal("13000000")
     finally:
@@ -783,7 +785,7 @@ async def test_need_more_data_can_be_corrected_and_resubmitted(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_missing_official_registration_date_stays_draft(monkeypatch) -> None:
+async def test_missing_official_registration_date_requests_data(monkeypatch) -> None:
     email = ""
     scoring_calls: list[dict[str, Any]] = []
 
@@ -816,9 +818,10 @@ async def test_missing_official_registration_date_stays_draft(monkeypatch) -> No
                 f"/api/v1/applications/{application_id}", headers=headers
             )
 
-        assert response.status_code == 409
+        assert response.status_code == 200
+        assert response.json()["required_fields"] == ["company.registration_date"]
         assert detail.status_code == 200
-        assert detail.json()["status"] == "DRAFT"
+        assert detail.json()["status"] == "NEED_MORE_DATA"
         assert scoring_calls == []
         async with session_factory() as session:
             snapshot = await session.scalar(
@@ -833,9 +836,9 @@ async def test_missing_official_registration_date_stays_draft(monkeypatch) -> No
                     )
                 )
             )
-        assert snapshot is None
-        assert len(events) == 1
-        assert events[0].event_type == "APPLICATION_DRAFT_CREATED"
+        assert snapshot.payload["required_fields"] == ["company.registration_date"]
+        assert len(events) == 4
+        assert events[-1].event_type == "APPLICATION_DATA_REQUIRED"
     finally:
         if email:
             await _cleanup_user(email)
@@ -1001,4 +1004,126 @@ async def test_reviewer_resolves_conditional_application(
             await _cleanup_user(applicant_email)
         if reviewer_email:
             await _cleanup_user(reviewer_email)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_smart_quote_creation_update_and_saved_rate() -> None:
+    email = None
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            email, headers = await _register_company_user(client)
+            payload = {'requested_amount':'4500000','term_months':24,'purpose_category':'investment'}
+            preview = await client.post('/api/v1/applications/quote',headers=headers,json=payload)
+            assert preview.status_code == 200, preview.text
+            quote = preview.json()
+            assert quote['annual_rate'] == '17.50'
+            created = await client.post('/api/v1/applications',headers=headers,json={**payload,'purpose':'Закупка оборудования'})
+            assert created.status_code == 201, created.text
+            application = created.json()
+            assert application['product_id'] == quote['product_id']
+            assert application['pricing'] == quote
+            assert application['purpose_category'] == 'investment'
+            changed = await client.patch('/api/v1/applications/'+application['id'],headers=headers,json={'requested_amount':'10000000','term_months':48})
+            assert changed.status_code == 200, changed.text
+            assert changed.json()['pricing']['annual_rate'] == '18.50'
+            loaded = await client.get('/api/v1/applications/'+application['id'],headers=headers)
+            assert loaded.json()['pricing'] == changed.json()['pricing']
+            bad = await client.post('/api/v1/applications/quote',headers=headers,json={**payload,'requested_amount':'99999999'})
+            assert bad.status_code == 422
+            assert (await client.post('/api/v1/applications/quote',json=payload)).status_code == 401
+    finally:
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_unknown_sources_request_data_and_snapshot_nulls_without_scoring(monkeypatch):
+    from app.integrations.financials import UnavailableFinancialProvider, get_financial_provider
+    from app.integrations.credit_history import UnavailableCreditHistoryProvider
+    app.dependency_overrides[get_financial_provider] = UnavailableFinancialProvider
+    app.dependency_overrides[get_credit_history_provider] = UnavailableCreditHistoryProvider
+    def must_not_score(**kwargs):
+        raise AssertionError('Unknown inputs must not reach scoring')
+    monkeypatch.setattr(application_workflow, 'score_and_explain', must_not_score)
+    email=''
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+            email,headers=await _register_company_user(client)
+            product=(await client.get('/api/v1/credit-products')).json()[0]
+            draft=await _create_draft(client,headers,product)
+            app_id=draft.json()['id']
+            submitted=await client.post(f'/api/v1/applications/{app_id}/submit',headers=headers)
+            assert submitted.status_code==200,submitted.text
+            assert submitted.json()['status']=='NEED_MORE_DATA'
+            assert 'credit_history.overdue_count' in submitted.json()['required_fields']
+            assert 'financials.profit_annual' in submitted.json()['required_fields']
+            assert submitted.json()['decision'] is None
+            async with session_factory() as session:
+                snapshot=await session.scalar(select(ApplicationSnapshot).where(ApplicationSnapshot.application_id==app_id))
+                original=snapshot.payload
+                assert original['financials']['revenue_annual'] is None
+                assert original['credit_history']['overdue_amount'] is None
+            patched=await client.patch('/api/v1/company/financials',headers=headers,json={'revenue_annual':100000})
+            assert patched.status_code==200
+            refreshed=await client.post('/api/v1/company/financials/refresh',headers=headers)
+            assert refreshed.json()['revenue_annual']==100000
+            assert refreshed.json()['field_sources']['revenue_annual']['source']=='USER_INPUT'
+            async with session_factory() as session:
+                snapshot=await session.scalar(select(ApplicationSnapshot).where(ApplicationSnapshot.application_id==app_id))
+                assert snapshot.payload==original
+            credit=await client.patch('/api/v1/company/credit-history',headers=headers,json={'overdue_count':0})
+            assert credit.status_code==200
+            assert credit.json()['source']=='USER_INPUT'
+            assert credit.json()['active_credits'] is None
+    finally:
+        app.dependency_overrides.pop(get_financial_provider,None)
+        app.dependency_overrides.pop(get_credit_history_provider,None)
+        if email:
+            await _cleanup_user(email)
+        await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_bki_refresh_needs_explicit_live_consent_and_revocation_blocks_requests():
+    from app.integrations.credit_history import GatewayCreditHistoryProvider
+    import httpx
+    calls=[]
+    def handle(request):
+        import json
+        payload=json.loads(request.content)
+        calls.append(payload)
+        return httpx.Response(200,json={'inn':payload['inn'],'as_of':'2026-01-01T00:00:00Z',
+            'active_credits':0,'closed_credits':1,'overdue_count':0,'overdue_amount':0})
+    provider=GatewayCreditHistoryProvider('https://example.test/report','test',transport=httpx.MockTransport(handle))
+    app.dependency_overrides[get_credit_history_provider]=lambda:provider
+    email=''
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+            email,headers=await _register_company_user(client)
+            endpoint='/api/v1/company/credit-history'
+            assert (await client.post(endpoint+'/refresh',headers=headers)).status_code==403
+            assert calls==[]
+            assert (await client.post(endpoint+'/consent',headers=headers,json={'accepted':False})).status_code==422
+            grant=await client.post(endpoint+'/consent',headers=headers,json={'accepted':True})
+            assert grant.status_code==200
+            refresh=await client.post(endpoint+'/refresh',headers=headers)
+            assert refresh.status_code==200,refresh.text
+            assert refresh.json()['source']=='BKI_GATEWAY'
+            assert len(calls)==1 and calls[0]['consent_id']
+            assert (await client.delete(endpoint+'/consent',headers=headers)).status_code==204
+            assert (await client.post(endpoint+'/refresh',headers=headers)).status_code==403
+            assert len(calls)==1
+            assert (await client.get(endpoint,headers=headers)).json()['overdue_count'] is None
+    finally:
+        app.dependency_overrides.pop(get_credit_history_provider,None)
+        if email:
+            # Consent audit belongs to this user and must be removed before test fixture cleanup.
+            from app.models import CreditHistoryConsent
+            async with session_factory() as session:
+                user=await session.scalar(select(User).where(User.email==email))
+                from sqlalchemy import delete
+                if user:
+                    await session.execute(delete(CreditHistoryConsent).where(CreditHistoryConsent.user_id==user.id))
+                    await session.commit()
+            await _cleanup_user(email)
         await engine.dispose()

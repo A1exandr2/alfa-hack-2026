@@ -10,6 +10,8 @@ from app.applications.service import (
     ApplicationReviewConflictError,
 )
 from app.models import (
+    AdminAudit,
+    User,
     Application,
     ApplicationDecision,
     ApplicationEvent,
@@ -77,6 +79,10 @@ async def review_application(
         comment=payload.comment,
     )
     session.add(review)
+    reviewer = await session.get(User, reviewer_user_id)
+    session.add(AdminAudit(actor_user_id=reviewer_user_id, actor_email=reviewer.email,
+                          action="APPLICATION_REVIEWED", target_id=application.id,
+                          details={"outcome": payload.outcome, "comment": payload.comment}))
     await session.flush()
 
     last_sequence = await session.scalar(

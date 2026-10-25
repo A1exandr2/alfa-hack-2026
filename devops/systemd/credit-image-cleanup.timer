@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily scoped cleanup of Credit release images
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1800
+Unit=credit-image-cleanup.service
+
+[Install]
+WantedBy=timers.target

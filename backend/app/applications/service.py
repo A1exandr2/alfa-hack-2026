@@ -8,6 +8,7 @@ from app.applications.schemas import (
     ApplicationCreateRequest,
     ApplicationUpdateRequest,
 )
+from app.applications.pricing import calculate_quote
 from app.models import Application, ApplicationEvent, CreditProduct, User
 
 
@@ -119,6 +120,18 @@ def _validate_terms(
         )
 
 
+async def quote_application(session, amount, months, category, product_id=None):
+    if product_id is not None:
+        products = [await _get_active_product(session, product_id)]
+        _validate_terms(products[0], amount, months)
+    else:
+        products = list(await session.scalars(select(CreditProduct).where(CreditProduct.is_active.is_(True))))
+    result = calculate_quote(products, amount, months, category, automatic=product_id is None)
+    if result is None:
+        raise InvalidApplicationTermsError("No product matches requested amount and term")
+    return result
+
+
 async def create_application(
     session: AsyncSession,
     user: User,
@@ -127,8 +140,7 @@ async def create_application(
     if user.company_id is None:
         raise CompanyNotLinkedError()
 
-    product = await _get_active_product(session, payload.product_id)
-    _validate_terms(product, payload.requested_amount, payload.term_months)
+    product, pricing = await quote_application(session, payload.requested_amount, payload.term_months, payload.purpose_category, payload.product_id)
 
     application_id = uuid4()
     application = Application(
@@ -136,9 +148,12 @@ async def create_application(
         user_id=user.id,
         company_id=user.company_id,
         product_id=product.id,
+        pricing=pricing,
+        purpose_category=payload.purpose_category,
         requested_amount=payload.requested_amount,
         term_months=payload.term_months,
         purpose=payload.purpose,
+        additional_info=payload.additional_info.strip(),
     )
     session.add(application)
     session.add(
@@ -197,8 +212,12 @@ async def update_application(
     product_id = changes.get("product_id", application.product_id)
     requested_amount = changes.get("requested_amount", application.requested_amount)
     term_months = changes.get("term_months", application.term_months)
-    product = await _get_active_product(session, product_id)
-    _validate_terms(product, requested_amount, term_months)
+    automatic = bool(application.pricing and application.pricing.get('selection_mode') == 'AUTO')
+    category = changes.get('purpose_category', application.purpose_category)
+    product, pricing = await quote_application(session, requested_amount, term_months, category,
+        changes.get('product_id') if automatic else product_id)
+    application.pricing = pricing
+    application.product_id = product.id
 
     for field, value in changes.items():
         setattr(application, field, value)
