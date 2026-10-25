@@ -1,4 +1,5 @@
 """Прозрачный rule-based скоринг риска для микробизнеса."""
+
 from typing import List, Literal, Tuple
 
 
@@ -7,7 +8,7 @@ def calculate_risk(
 ) -> Tuple[float, List[str]]:
     """
     Возвращает (score 0-100, top_factors).
-    
+
     Args:
         company: {"company_age": float}
         financials: {"revenue": float, "profit_margin": float}
@@ -59,9 +60,9 @@ def get_risk_level(score: float) -> str:
     return "High"
 
 
-def get_decision(score: float) -> Literal[
-    "APPROVED", "CONDITIONAL_APPROVAL", "REJECTED"
-]:
+def get_decision(
+    score: float,
+) -> Literal["APPROVED", "CONDITIONAL_APPROVAL", "REJECTED"]:
     if score <= 30:
         return "APPROVED"
     if score <= 60:

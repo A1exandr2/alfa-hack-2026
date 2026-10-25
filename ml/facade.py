@@ -1,4 +1,5 @@
 """Единая точка входа ML-модуля для backend. Backend импортирует только это."""
+
 from typing import Optional
 
 from ml.llm_assistant.service import get_ai_advice
@@ -25,10 +26,10 @@ def score_and_explain(
         user_query: дополнительная информация от клиента
         loan_term_months: срок заявки в месяцах, если выбран продукт
         product: выбранный продукт и его ограничения, если он есть
-    
+
     Returns:
         {
-            "risk_score": float, 
+            "risk_score": float,
             "risk_level": "Low" | "Medium" | "High",
             "decision": "APPROVED" | "CONDITIONAL_APPROVAL" | "REJECTED",
             "top_factors": [str],
@@ -37,10 +38,10 @@ def score_and_explain(
     """
     score, factors = calculate_risk(company, financials, credit)
     result = {
-        "risk_score": score, 
+        "risk_score": score,
         "risk_level": get_risk_level(score),
         "top_factors": factors,
-        "ai_advice": None
+        "ai_advice": None,
     }
 
     effective_query = user_query

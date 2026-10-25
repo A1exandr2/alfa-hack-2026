@@ -17,9 +17,7 @@ def sanitize_user_query(query: str) -> str:
     return cleaned.strip()[:2000]
 
 
-def enrich_data_for_llm(
-    raw_data: dict, risk_score: float, risk_factors: list
-) -> dict:
+def enrich_data_for_llm(raw_data: dict, risk_score: float, risk_factors: list) -> dict:
     """
     Превращает сырые цифры в текстовый контекст для LLM.
     Включает заранее рассчитанный risk_score и данные конкретной заявки.
@@ -34,9 +32,7 @@ def enrich_data_for_llm(
             f"срок: {product['min_term_months']}–{product['max_term_months']} мес."
         )
     loan_term = raw_data.get("loan_term_months")
-    loan_term_context = (
-        f"{loan_term} мес." if loan_term is not None else "не указан"
-    )
+    loan_term_context = f"{loan_term} мес." if loan_term is not None else "не указан"
     context = f"""
     Данные компании:
     - Возраст: {raw_data['company_age']} лет.
@@ -53,6 +49,6 @@ def enrich_data_for_llm(
     - Ключевые факторы риска: {', '.join(risk_factors) if risk_factors else 'не выявлены'}.
     """
     return {
-        "context": context, 
+        "context": context,
         "safe_query": sanitize_user_query(raw_data["user_query"]),
     }

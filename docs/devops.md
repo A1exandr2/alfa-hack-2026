@@ -90,6 +90,8 @@ Runner для Docker-задач должен иметь доступ к Docker: 
 
 Локальный runner имеет метку `credit`. Текущие CI/CD jobs дополнительно требуют `credit-server`, поэтому выполняются на серверном runner `credit-server`, установленном в `/opt/credit-runner` как systemd-служба под пользователем `credit-runner`. На хосте должны быть установлены Git, Python 3, make, Docker Compose, SOPS и age (включая age-keygen); эти команды должны быть доступны в PATH службы. Deployment tests создают собственные временные ключи и не требуют production identity. PR из чужих fork отключены на уровне условий jobs. Не запускайте на своем компьютере jobs из чужих PR.
 
+На сервере alpha нет маршрута IPv6. Для registry-запросов Docker используется системный cgo DNS resolver: в `/etc/systemd/system/docker.service.d/20-credit-dns.conf` заданы `[Service]` и `Environment="GODEBUG=netdns=cgo+1"`, а в `/etc/gai.conf` — `precedence ::ffff:0:0/96 100`. Это даёт приоритет доступному IPv4 без фиксации меняющихся IP Docker Hub. Параметр применим к установленной сборке dockerd с поддержкой cgo; настройка описана в [документации Go net](https://pkg.go.dev/net#hdr-Name_Resolution). После изменения нужен `systemctl daemon-reload` и перезапуск Docker в промежутке между CI jobs. Исходная gai.conf сохранена на сервере как `/etc/gai.conf.credit-before-ipv4`.
+
 Документация: https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners
 
 ### Фактическая проверка dev 22.10.2026
