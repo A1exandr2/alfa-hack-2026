@@ -35,3 +35,16 @@ ml/artifacts/*
 devops/runner/local/
 devops/runner/*.tar.gz
 devops/runner/*.token
+
+# Data
+data/*.csv
+# Local previews, QA dependencies and database backups
+.local/
+
+# Private age identities (encrypted secrets/server.enc.env is intentionally tracked)
+*.agekey
+age-keys.txt
+keys.txt
+
+# Local cloud credentials are never project artifacts
+.aws

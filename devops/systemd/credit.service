@@ -1,0 +1,30 @@
+[Unit]
+Description=Credit cabinet with SOPS configuration
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/credit/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=SOPS_AGE_KEY_FILE=/etc/credit/age/keys.txt
+Environment=CREDIT_DEPLOY_MODE=cpu
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/credit/runtime.conf
+ExecStart=/usr/bin/python3 /opt/credit/current/devops/scripts/server-runtime.py up
+ExecReload=/usr/bin/python3 /opt/credit/current/devops/scripts/server-runtime.py up
+ExecStop=/usr/bin/python3 /opt/credit/current/devops/scripts/server-runtime.py stop
+TimeoutStartSec=1800
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,24 +1,166 @@
 name: credit
 
-# Empty Dockerfiles are intentional. Enable app profile after implementation.
+x-backend: &backend
+  image: ${BACKEND_IMAGE:-credit-backend:local}
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+    target: production
+  init: true
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:?Run make init first}@postgres:5432/${POSTGRES_DB:-credit}
+    JWT_SECRET: ${JWT_SECRET:?Run make init first}
+    ADMIN_LOGIN: ${ADMIN_LOGIN:-Admin}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    OLLAMA_HOST: http://ollama:11434
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+    OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-120}
+    DADATA_API_KEY: ${DADATA_API_KEY:-}
+    DATA_MODE: ${DATA_MODE:-real}
+    CREDIT_HISTORY_API_URL: ${CREDIT_HISTORY_API_URL:-}
+    CREDIT_HISTORY_API_TOKEN: ${CREDIT_HISTORY_API_TOKEN:-}
+    JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-60}
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: ['/tmp:rw,nosuid,nodev,size=64m']
+  networks: [internal, registry-access]
+
 services:
-  frontend:
-    profiles: [app]
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    init: true
+  ollama:
+    image: ollama/ollama@sha256:b88c73ace3e115f8ec53dc8761ae1c0aabfa675406e3681786b98757ce050f42
+    profiles: [llm]
+    restart: unless-stopped
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      OLLAMA_CONTEXT_LENGTH: '4096'
+      OLLAMA_NUM_PARALLEL: '1'
+      OLLAMA_MAX_LOADED_MODELS: '1'
+      OLLAMA_KEEP_ALIVE: 10m
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    ports: ["127.0.0.1:3000:3000"]
+    networks: [internal, model-download]
+
+  postgres:
+    image: postgres:16.10-alpine3.22
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-credit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make init first}
+      POSTGRES_DB: ${POSTGRES_DB:-credit}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-55432}:5432'
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [internal, database-access]
+
+  migrate:
+    <<: *backend
+    restart: 'no'
+    command: [alembic, upgrade, head]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  admin-bootstrap:
+    <<: *backend
+    profiles: [admin]
+    restart: 'no'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:?Run make init first}@postgres:5432/${POSTGRES_DB:-credit}
+      JWT_SECRET: ${JWT_SECRET:?Run make init first}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    command: [python, -m, app.admin.bootstrap, --from-env]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   backend:
-    profiles: [app]
+    <<: *backend
+    restart: unless-stopped
+    mem_limit: 512m
+    pids_limit: 128
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:1.28.0-alpine3.21
+    restart: unless-stopped
+    ports:
+      - '${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080'
+    volumes:
+      - ./devops/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -qO-, 'http://127.0.0.1:8080/api/v1/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    security_opt: [no-new-privileges:true]
+    networks: [internal, edge]
+
+  test-db:
+    image: postgres:16.10-alpine3.22
+    profiles: [test]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-credit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run make init first}
+      POSTGRES_DB: credit_test
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d credit_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  test:
+    <<: *backend
+    image: credit-backend-test:local
+    profiles: [test]
     build:
       context: .
       dockerfile: backend/Dockerfile
-    init: true
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    ports: ["127.0.0.1:8080:8080"]
-# ML inference belongs inside backend; ml/Dockerfile is for offline training.
-# devops/Dockerfile is reserved for tooling, not an application service.
+      target: test
+    environment:
+      DATA_MODE: demo
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-credit}:${POSTGRES_PASSWORD:?Run make init first}@test-db:5432/credit_test
+      JWT_SECRET: ${JWT_SECRET:?Run make init first}
+    command: [sh, -ec, 'alembic upgrade head; python -m pytest -q -p no:cacheprovider']
+    healthcheck:
+      disable: true
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+volumes:
+  ollama_data:
+  postgres_data:
+
+networks:
+  internal:
+    internal: true
+  edge:
+  database-access:
+  model-download:
+  registry-access:
