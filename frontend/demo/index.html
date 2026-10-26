@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080a13">
+  <meta name="description" content="Демонстрация Smart Credit Cabinet: компания, документы, локальный ИИ, заявки, мобильная версия, админ-панель и CI/CD.">
+  <title>Smart Credit Cabinet — демонстрация</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #080a13; color: #f5f5fa; }
+    body { margin: 0; background: radial-gradient(ellipse at 70% 40%, #25204b, transparent 65%); min-height: 100vh; }
+    main { max-width: 1400px; margin: auto; padding: clamp(20px, 5vw, 72px); }
+    .brand { color: #ff5148; font-size: 15px; font-weight: 700; letter-spacing: .12em; }
+    h1 { font-size: clamp(28px, 4vw, 52px); line-height: 1.15; margin: 24px 0 16px; }
+    p { color: #abb2c9; line-height: 1.65; max-width: 900px; }
+    video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 18px; background: #070910; box-shadow: 0 24px 100px #0008; margin: 30px 0; }
+    nav { display: flex; flex-wrap: wrap; gap: 18px; margin: 22px 0; }
+    a { color: #ff827a; text-underline-offset: 4px; }
+    a:focus-visible { outline: 2px solid currentColor; outline-offset: 6px; }
+    small { color: #8e96af; }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+  </style>
+</head>
+<body><main>
+  <div class="brand">АЛЬФА ХАК · SMART CREDIT CABINET</div>
+  <h1>От планов бизнеса — к следующему шагу.</h1>
+  <p>Компания, отчётность, локальная Qwen, заявки и рабочее место сотрудника. В конце — реальные результаты CI/CD и сканирования Nuclei.</p>
+  <video controls playsinline preload="metadata" poster="poster.jpg" aria-label="Демонстрация кредитного кабинета с русскими титрами и фоновой музыкой">
+    <source src="credit-demo.mp4" type="video/mp4">
+    Ваш браузер не поддерживает видео. <a href="credit-demo.mp4">Скачать ролик MP4</a>.
+  </video>
+  <small>2:03 · 1920×1080 · 60 кадров/с · Русские титры и музыка. Данные компании и заявки вымышлены.</small>
+  <nav aria-label="Ссылки демонстрации"><a href="/">Открыть кабинет</a><a href="credit-demo.mp4" download>Скачать MP4</a><a href="https://github.com/A1exandr2/alfa-hack-2026">Репозиторий</a></nav>
+  <p>Снята версия 489fd4d. Ответы API не подменялись: импорт использовал TEXT + QWEN, источник оценки заявки — AI. Для локального ИИ нужны включённый компьютер, Ollama и защищённый туннель.</p>
+  <p>CI: <a href="https://github.com/A1exandr2/alfa-hack-2026/actions/runs/40231539636">10 успешных заданий</a>. CD: <a href="https://github.com/A1exandr2/alfa-hack-2026/actions/runs/40232115981">Production и DAST</a>. Nuclei: HIGH/CRITICAL — 0; MEDIUM — 1, LOW — 2, INFO — 12. Запущено 9 873 подписанных шаблона; 244 шаблона сообщили runtime error. Прохождение порога релиза не означает отсутствия всех замечаний.</p>
+</main></body></html>
